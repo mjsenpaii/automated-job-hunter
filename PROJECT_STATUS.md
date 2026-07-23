@@ -1,8 +1,9 @@
 # Project Status
 
-**Last updated:** 2026-07-24T02:45 PHT  
-**Current phase:** Phase 5 Complete  
-**Overall health:** 🟢 90/90 tests passing — 3 commits
+**Last updated:** 2026-07-24T03:35 PHT  
+**Current phase:** Phase 5 Complete + Job URL Importer & Automated Scoring Validation integrated  
+**Overall health:** 🟢 141/141 tests passing (18 files)  
+**Active branch:** `handoff/cursor-integration`
 
 ---
 
@@ -30,9 +31,9 @@
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 24 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
 | `@job-app/db` | Drizzle ORM + SQLite | Schema ready |
-| `@job-app/ingestion` | Normalizer, pipeline, manual adapter | 6 ✅ |
+| `@job-app/ingestion` | Normalizer, pipeline, manual + **URL-import adapter (SSRF-hardened)**, realistic validation | 57 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
-| `@job-app/dashboard` | Next.js premium dark UI | Running |
+| `@job-app/dashboard` | Next.js premium dark UI + **Import URL page & `/api/extract`** | Running |
 
 ### Generated Artifacts
 - `resumes/generated/resume-software-developer.docx` (8.9 KB)
@@ -47,3 +48,24 @@
 | `415c527` | Phase 0-3 foundation | 71 |
 | `84eb678` | Phase 2 — ingestion + dashboard wiring | 77 |
 | `5540f9f` | Phase 4-5 — DOCX resumes + application packages | 90 |
+| `b003fb8` | wip: preserve AGY URL importer and validation work | 114 |
+| _(this commit)_ | feat: complete job URL importer and automated scoring validation | 141 |
+
+---
+
+## Session — Job URL Importer & Automated Scoring Validation
+
+Integrated two parallel work streams on branch `handoff/cursor-integration`:
+
+**1. Job URL importer** (`packages/ingestion/src/adapters/url-extractor.ts`, dashboard `import-job` page + `/api/extract`):
+- Public job-URL fetch → JSON-LD / meta-tag / HTML-heuristic extraction → editable preview → save & score.
+- **SSRF hardened** during integration: http/https only; localhost/`*.local` blocking; full private/loopback/link-local/CGNAT/multicast IPv4 blocking (incl. `169.254.169.254`); IPv6 loopback/ULA/link-local + IPv4-mapped blocking; **DNS-resolution validation**; **per-redirect-hop re-validation**; request timeout; **response-size cap (2 MB)**. No authenticated scraping, no CAPTCHA bypass, no application submission.
+
+**2. Automated scoring validation** (`packages/ingestion/tests/validation-realistic.test.ts`, `generate-validation-report.ts`, `docs/AUTOMATED_JOB_VALIDATION_REPORT.md`):
+- All 8 realistic scenarios execute through the **real** `ingestJob` production pipeline.
+- Production bug fixed: `pipeline.ts` now calls `checkEligibility(normalized, category, workSetup)` (was 1-arg → eligibility never evaluated).
+- `work-setup.ts`: removed generic `'flexible'` HYBRID signal (fixed Scenario 1 REMOTE mis-classification).
+
+**Test delta:** 114 (preserved) → **141** (+25 SSRF regression tests, +2 report-verification tests).
+
+> ⚠️ Pre-existing build-infra failures (turbo/tsc/`next build`) are **out of scope** for this commit — see `NEXT_ACTIONS.md`.
