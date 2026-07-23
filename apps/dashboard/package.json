@@ -11,7 +11,10 @@
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "@job-app/core": "workspace:*"
+    "@job-app/core": "workspace:*",
+    "@job-app/db": "workspace:*",
+    "@job-app/classification": "workspace:*",
+    "@job-app/scoring": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -1,41 +1,32 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import JobCard from '@/components/JobCard';
 
 export default function IntlJobsPage() {
-  const intlJobs = [
-    {
-      id: 'intl-1',
-      title: 'Senior React Developer',
-      company: 'US Startup Inc.',
-      location: 'San Francisco, CA',
-      setup: 'Remote',
-      score: 95,
-      status: 'Interview',
-      postedAt: '2h ago',
-      salary: '$120k - $160k USD'
-    },
-    {
-      id: 'intl-2',
-      title: 'Frontend Tech Lead',
-      company: 'Euro FinTech',
-      location: 'London, UK',
-      setup: 'Remote',
-      score: 88,
-      status: 'Shortlisted',
-      postedAt: '1d ago',
-      salary: '£80k - £110k GBP'
-    },
-    {
-      id: 'intl-3',
-      title: 'Full Stack Engineer',
-      company: 'Aussie SaaS',
-      location: 'Sydney, AU',
-      setup: 'Remote',
-      score: 82,
-      status: 'Review',
-      postedAt: '3d ago',
-      salary: '$100k - $130k AUD'
-    }
-  ];
+  const [intlJobs, setIntlJobs] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/jobs')
+      .then(res => res.json())
+      .then(data => {
+        const formattedJobs = data
+          .filter((j: any) => j.job.category === 'INTERNATIONAL' || (j.job.country && j.job.country?.toLowerCase() !== 'philippines'))
+          .map((j: any) => ({
+            id: j.job.id,
+            title: j.job.title,
+            company: j.job.company,
+            location: [j.job.city, j.job.country].filter(Boolean).join(', ') || 'International',
+            setup: j.job.work_setup,
+            score: j.score?.score || 0,
+            status: j.job.status,
+            postedAt: new Date(j.job.date_posted).toLocaleDateString(),
+            salary: j.job.salary_min ? `$${j.job.salary_min.toLocaleString()}` : undefined
+          }));
+        setIntlJobs(formattedJobs);
+      })
+      .catch(console.error);
+  }, []);
 
   return (
     <div className="animate-fade-in">
@@ -56,6 +47,11 @@ export default function IntlJobsPage() {
         {intlJobs.map(job => (
           <JobCard key={job.id} job={job} />
         ))}
+        {intlJobs.length === 0 && (
+          <div className="col-span-3 text-center text-gray-500 py-8">
+            No International jobs found.
+          </div>
+        )}
       </div>
     </div>
   );

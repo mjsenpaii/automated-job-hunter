@@ -1,52 +1,32 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import JobCard from '@/components/JobCard';
 
 export default function PHJobsPage() {
-  const phJobs = [
-    {
-      id: 'ph-1',
-      title: 'Senior Frontend Developer',
-      company: 'Manila Tech Hub',
-      location: 'BGC, Taguig',
-      setup: 'Hybrid',
-      score: 89,
-      status: 'Review',
-      postedAt: '1h ago',
-      salary: '₱120k - ₱180k'
-    },
-    {
-      id: 'ph-2',
-      title: 'Full Stack Engineer',
-      company: 'Fintech PH',
-      location: 'Makati',
-      setup: 'Onsite',
-      score: 76,
-      status: 'Pending',
-      postedAt: '4h ago',
-      salary: '₱90k - ₱140k'
-    },
-    {
-      id: 'ph-3',
-      title: 'React Developer',
-      company: 'Outsource Pro',
-      location: 'Cebu City',
-      setup: 'Remote',
-      score: 91,
-      status: 'Shortlisted',
-      postedAt: '1d ago',
-      salary: '₱100k - ₱150k'
-    },
-    {
-      id: 'ph-4',
-      title: 'Web Developer',
-      company: 'Local Agency',
-      location: 'Quezon City',
-      setup: 'Hybrid',
-      score: 64,
-      status: 'Rejected',
-      postedAt: '2d ago',
-      salary: '₱60k - ₱80k'
-    }
-  ];
+  const [phJobs, setPhJobs] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/jobs')
+      .then(res => res.json())
+      .then(data => {
+        const formattedJobs = data
+          .filter((j: any) => j.job.category === 'PH' || j.job.country?.toLowerCase() === 'philippines')
+          .map((j: any) => ({
+            id: j.job.id,
+            title: j.job.title,
+            company: j.job.company,
+            location: [j.job.city, j.job.country].filter(Boolean).join(', ') || 'Philippines',
+            setup: j.job.work_setup,
+            score: j.score?.score || 0,
+            status: j.job.status,
+            postedAt: new Date(j.job.date_posted).toLocaleDateString(),
+            salary: j.job.salary_min ? `₱${j.job.salary_min.toLocaleString()}` : undefined
+          }));
+        setPhJobs(formattedJobs);
+      })
+      .catch(console.error);
+  }, []);
 
   return (
     <div className="animate-fade-in">
@@ -67,6 +47,11 @@ export default function PHJobsPage() {
         {phJobs.map(job => (
           <JobCard key={job.id} job={job} />
         ))}
+        {phJobs.length === 0 && (
+          <div className="col-span-3 text-center text-gray-500 py-8">
+            No Philippine jobs found.
+          </div>
+        )}
       </div>
     </div>
   );

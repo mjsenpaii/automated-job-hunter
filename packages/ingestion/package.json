@@ -1,0 +1,25 @@
+{
+  "name": "@job-app/ingestion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@job-app/core": "workspace:*",
+    "@job-app/classification": "workspace:*",
+    "@job-app/scoring": "workspace:*",
+    "@job-app/db": "workspace:*",
+    "zod": "^3.25.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

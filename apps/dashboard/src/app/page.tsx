@@ -1,39 +1,36 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import StatsCard from '@/components/StatsCard';
 import JobCard from '@/components/JobCard';
 
 export default function DashboardHome() {
-  const mockRecentJobs = [
-    {
-      id: '1',
-      title: 'Senior Frontend Engineer',
-      company: 'TechCorp PH',
-      location: 'Manila, Philippines',
-      setup: 'Hybrid',
-      score: 88,
-      status: 'Review',
-      postedAt: '2h ago'
-    },
-    {
-      id: '2',
-      title: 'Full Stack Developer',
-      company: 'Global Startup',
-      location: 'San Francisco, CA',
-      setup: 'Remote',
-      score: 92,
-      status: 'Applied',
-      postedAt: '1d ago'
-    },
-    {
-      id: '3',
-      title: 'React Native Developer',
-      company: 'Mobile Solutions',
-      location: 'Cebu, Philippines',
-      setup: 'Onsite',
-      score: 72,
-      status: 'Pending',
-      postedAt: '3d ago'
-    }
-  ];
+  const [stats, setStats] = useState<any>(null);
+  const [jobs, setJobs] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/stats')
+      .then(res => res.json())
+      .then(data => setStats(data))
+      .catch(console.error);
+
+    fetch('/api/jobs')
+      .then(res => res.json())
+      .then(data => {
+        const formattedJobs = data.map((j: any) => ({
+          id: j.job.id,
+          title: j.job.title,
+          company: j.job.company,
+          location: [j.job.city, j.job.country].filter(Boolean).join(', ') || 'Anywhere',
+          setup: j.job.work_setup,
+          score: j.score?.score || 0,
+          status: j.job.status,
+          postedAt: new Date(j.job.date_posted).toLocaleDateString()
+        }));
+        setJobs(formattedJobs.slice(0, 6));
+      })
+      .catch(console.error);
+  }, []);
 
   return (
     <div className="animate-fade-in">
@@ -45,8 +42,8 @@ export default function DashboardHome() {
       <div className="grid grid-cols-4 lg-grid-cols-2 md-grid-cols-1 gap-6 mb-6">
         <StatsCard 
           title="Total Jobs Scraped" 
-          value="1,284" 
-          trend="12% vs last week"
+          value={stats?.totalJobs?.toLocaleString() || "0"} 
+          trend="Real-time data"
           trendUp={true}
           icon={
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -56,8 +53,8 @@ export default function DashboardHome() {
         />
         <StatsCard 
           title="Shortlisted" 
-          value="42" 
-          trend="5 new today"
+          value={stats?.shortlistedJobs?.toString() || "0"} 
+          trend="USER_APPROVED"
           trendUp={true}
           icon={
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -67,8 +64,8 @@ export default function DashboardHome() {
         />
         <StatsCard 
           title="Applied" 
-          value="18" 
-          trend="2 awaiting response"
+          value={stats?.appliedJobs?.toString() || "0"} 
+          trend="Applications sent"
           trendUp={true}
           icon={
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -78,8 +75,8 @@ export default function DashboardHome() {
         />
         <StatsCard 
           title="Average Score" 
-          value="84" 
-          trend="top 15% of market"
+          value={stats?.averageScore?.toString() || "0"} 
+          trend="Overall match"
           trendUp={true}
           icon={
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -96,9 +93,14 @@ export default function DashboardHome() {
         </div>
         
         <div className="grid grid-cols-3 lg-grid-cols-2 md-grid-cols-1 gap-6">
-          {mockRecentJobs.map(job => (
+          {jobs.map(job => (
             <JobCard key={job.id} job={job} />
           ))}
+          {jobs.length === 0 && (
+            <div className="col-span-3 text-center text-gray-500 py-8">
+              No jobs found. Go to Add Job to ingest some data.
+            </div>
+          )}
         </div>
       </section>
     </div>
