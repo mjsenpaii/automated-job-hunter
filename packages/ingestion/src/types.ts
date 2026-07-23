@@ -30,6 +30,7 @@ export interface IngestionResult {
   rejection_reasons?: string[];
   duplicate_of_id?: string;
   error?: string;
+  normalized_job?: any;
 }
 
 export interface SourceAdapter {

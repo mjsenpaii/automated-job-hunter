@@ -9,6 +9,7 @@ export default function Sidebar() {
   const navItems = [
     { label: 'Dashboard', href: '/' },
     { label: 'Add Job', href: '/add-job' },
+    { label: 'Import URL', href: '/import-job' },
     { label: 'PH Jobs', href: '/ph-jobs' },
     { label: 'International Jobs', href: '/intl-jobs' },
     { label: 'Applications', href: '/applications' },
