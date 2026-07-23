@@ -1,0 +1,16 @@
+{
+  "name": "@job-app/db",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "drizzle-orm": "^0.30.10",
+    "better-sqlite3": "^9.6.0",
+    "@job-app/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "drizzle-kit": "^0.21.2",
+    "@types/better-sqlite3": "^7.6.10"
+  }
+}

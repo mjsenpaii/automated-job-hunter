@@ -1,0 +1,37 @@
+{
+  "name": "Mark John B. Matining",
+  "location": "Pili, Boac, Marinduque, Philippines",
+  "education": [
+    {
+      "degree": "BS Information Technology",
+      "major": "Software Development",
+      "institution": "Marinduque State University",
+      "graduation_date": "2026-05-29"
+    }
+  ],
+  "social_links": {
+    "github": "https://github.com/mjsenpaii",
+    "linkedin": "https://www.linkedin.com/in/mend4x/"
+  },
+  "certifications": [
+    {
+      "name": "HackforGov 2025 (participant)"
+    },
+    {
+      "name": "DICT Cloud Computing",
+      "year": 2024
+    },
+    {
+      "name": "DICT AI",
+      "year": 2024
+    },
+    {
+      "name": "DICT Python",
+      "year": 2024
+    },
+    {
+      "name": "DICT Cybersecurity/Ethical Hacking",
+      "year": 2024
+    }
+  ]
+}

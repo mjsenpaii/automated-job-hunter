@@ -1,0 +1,43 @@
+[
+  {
+    "name": "HAPAG",
+    "type": "Academic project",
+    "role": "Leader, Full-stack developer",
+    "technologies": ["FlutterFlow", "Supabase", "Dart", "APIs"],
+    "description": "Academic project built with FlutterFlow, Supabase, and custom Dart code."
+  },
+  {
+    "name": "Paampom-Hangout",
+    "type": "Freelance project",
+    "technologies": ["Flutter"],
+    "status": "Alpha",
+    "description": "Developed for WPDG."
+  },
+  {
+    "name": "Circles",
+    "type": "Freelance project",
+    "technologies": ["Flutter"],
+    "status": "Alpha",
+    "description": "Developed for WPDG."
+  },
+  {
+    "name": "Raffle-Draw",
+    "type": "Personal project",
+    "source": "GitHub"
+  },
+  {
+    "name": "Fitness-Buddy",
+    "type": "Personal project",
+    "source": "GitHub"
+  },
+  {
+    "name": "matining-server",
+    "type": "Personal project",
+    "source": "GitHub"
+  },
+  {
+    "name": "gasolina",
+    "type": "Personal project",
+    "source": "GitHub"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "company": "WPDG (Wilmer Pascual Development Group)",
+    "role": "Freelance Developer",
+    "start_date": "2026-06",
+    "end_date": "present",
+    "type": "Freelance",
+    "description": "Flutter native development. Completed 1 app. Paampom-Hangout and Circles currently in alpha."
+  },
+  {
+    "company": "DOST",
+    "program": "LODIXR Program",
+    "role": "OJT",
+    "year": "2026",
+    "duration": "486 hours",
+    "type": "Internship",
+    "mode": "Hybrid (3 days onsite DOST-Marinduque, 2 days WFH for Central Office)",
+    "description": "Built EIS microservices and TypeScript APIs.",
+    "awards": ["Code Master Award"]
+  }
+]

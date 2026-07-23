@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+allowBuilds:
+  better-sqlite3: set this to true or false
+  es5-ext: set this to true or false
+  esbuild: true
+  sharp: set this to true or false

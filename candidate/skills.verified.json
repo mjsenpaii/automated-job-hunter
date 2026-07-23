@@ -1,0 +1,121 @@
+[
+  {
+    "skill": "TypeScript",
+    "verification_status": "verified",
+    "source": "DOST OJT",
+    "source_reference": "Built EIS microservices and TypeScript APIs",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Flutter/Dart",
+    "verification_status": "verified",
+    "source": "HAPAG project, WPDG freelance",
+    "source_reference": "Flutter native apps, custom Dart code",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "FlutterFlow",
+    "verification_status": "verified",
+    "source": "HAPAG project",
+    "source_reference": "Academic project",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Supabase",
+    "verification_status": "verified",
+    "source": "HAPAG project",
+    "source_reference": "Academic project",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "JavaScript",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "HTML/CSS",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Java",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "API Development",
+    "verification_status": "verified",
+    "source": "DOST OJT, HAPAG project",
+    "source_reference": "Built EIS microservices and TypeScript APIs",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Microservices",
+    "verification_status": "verified",
+    "source": "DOST OJT",
+    "source_reference": "Built EIS microservices",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Figma/UI-UX",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Prompt Engineering",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "AI Integration",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "AI Automation",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Agentic Development",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Networking",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Cybersecurity",
+    "verification_status": "verified",
+    "source": "CV, Certifications",
+    "source_reference": "DICT Cybersecurity/Ethical Hacking 2024, HackforGov 2025",
+    "allowed_in_resume": true
+  },
+  {
+    "skill": "Hardware Repairs",
+    "verification_status": "verified",
+    "source": "CV",
+    "source_reference": "General CV claim",
+    "allowed_in_resume": true
+  }
+]
