@@ -1,19 +1,19 @@
 {
-  "name": "@job-app/resume",
+  "name": "@job-app/application",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.ts",
-  "scripts": {
-    "test": "vitest run",
-    "generate": "tsx src/cli.ts"
-  },
   "dependencies": {
     "@job-app/core": "workspace:*",
-    "docx": "^9.7.1"
+    "@job-app/resume": "workspace:*",
+    "@job-app/db": "workspace:*",
+    "nanoid": "^5.0.7"
   },
   "devDependencies": {
-    "tsx": "^4.23.1",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

@@ -73,3 +73,20 @@ export function seniorityCheckGate(resume: ResumeDocument, targetSeniority: stri
     reasons
   };
 }
+
+export function runQualityGates(resume: ResumeDocument, verifiedFacts: any = {}): QualityGateResult {
+  const factResult = factCheckGate(resume, verifiedFacts);
+  const atsResult = atsCheckGate(resume);
+  const seniorityResult = seniorityCheckGate(resume, 'junior');
+
+  const allReasons = [
+    ...factResult.reasons,
+    ...atsResult.reasons,
+    ...seniorityResult.reasons
+  ];
+
+  return {
+    pass: factResult.pass && atsResult.pass && seniorityResult.pass,
+    reasons: allReasons
+  };
+}
