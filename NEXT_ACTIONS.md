@@ -1,17 +1,24 @@
 # Next Actions
 
-**Last updated:** 2026-07-24T03:35 PHT
-**Current state:** 141/141 tests passing (18 files). Job URL importer + automated scoring validation integrated on branch `handoff/cursor-integration`.
+**Last updated:** 2026-07-24T04:10 PHT
+**Current state:** 141/141 tests passing (18 files). URL importer + validation integrated, and the **dashboard build & runtime are now fixed** on branch `fix/dashboard-build-runtime`. `pnpm build` is green, all package builds pass, and the dashboard builds and runs.
 
 ---
 
 ## Run the dashboard
 
 ```powershell
+# Build workspace packages first (dashboard consumes their compiled `dist`):
+pnpm build
+# Then start the dev server:
 pnpm --filter @job-app/dashboard dev
 ```
 
-Then open http://localhost:3000. New **Import URL** page: http://localhost:3000/import-job
+Then open http://localhost:3000. **Import URL** page: http://localhost:3000/import-job
+
+> The dashboard consumes the workspace packages as compiled `dist`, so build the packages
+> (`pnpm build`, or at least once) before `dev`/`build`. See
+> `apps/dashboard/README.md` → "Workspace packages & build strategy".
 
 ### Quick test of the URL importer
 1. Start the dashboard (command above).
@@ -27,9 +34,31 @@ pnpm --filter @job-app/ingestion exec vitest run tests/url-extractor.test.ts
 
 ---
 
-## ⚠️ Known Pre-Existing Build Failures (out of scope for the integration commit)
+## ✅ Build Failures — RESOLVED on `fix/dashboard-build-runtime`
 
-These pre-date the URL-importer and validation work (confirmed against `HEAD` / commit `5540f9f`). They are **not** caused by that work and were intentionally left untouched. Recommend handling on a **separate branch/commit**. The project's green gate is `pnpm test` (Vitest via esbuild, no type-check).
+The build/runtime failures below (originally documented as out-of-scope for the integration commit)
+are now **fixed**. `pnpm build`, all package builds, and `pnpm --filter @job-app/dashboard build`
+pass, and the dashboard runs. The three items are kept as a record of what changed. See the
+"Workspace packages & build strategy" section of `apps/dashboard/README.md` and the PROJECT_STATUS
+session note for the full strategy — **do not reintroduce `transpilePackages` for the workspace
+packages; they are consumed as compiled `dist`.**
+
+Resolution summary:
+- **#1 Turbo:** added `"packageManager": "pnpm@11.16.0"` to root `package.json`; also set pnpm 11
+  `allowBuilds` in `pnpm-workspace.yaml` (and removed the ignored legacy `pnpm.onlyBuiltDependencies`).
+- **#2 `tsc` package builds:** added `@types/node` to `classification` + `ingestion`; fixed
+  `packages/ingestion/tsconfig.json` (`include: ["src"]`, dropped the sibling-source `paths`, excluded
+  the report script); added nameable return types in `packages/db/src/connection.ts`.
+- **#3 Next 16 `params`:** the three dynamic route handlers now use `params: Promise<{ id: string }>`
+  + `await`.
+- **Also fixed:** workspace packages now build to `dist` and the dashboard consumes that;
+  `@job-app/db` exposes `exports` for `/schema` and `/connection`; `drizzle-orm` +
+  `@job-app/ingestion` declared as dashboard deps; `api/jobs` POST rewritten to call the real
+  `ingestJob` pipeline (nonexistent `classifyJob` removed); APIs return structured JSON; DB opens
+  lazily and self-provisions via `ensureSchema()`; `better-sqlite3` bumped `9 → ^12` for a Node-24
+  prebuilt binary; unimplemented sidebar links hidden.
+
+<details><summary>Original failure records (now fixed)</summary>
 
 ### 1. Turbo cannot resolve the workspace
 - **Command:** `pnpm build` (→ `turbo run build`) — also `pnpm lint` (`turbo run lint`).
@@ -51,6 +80,8 @@ These pre-date the URL-importer and validation work (confirmed against `HEAD` / 
 - **Why pre-existing:** Next.js 16 changed dynamic route handler `params` to a `Promise`. These committed routes still use the old synchronous `{ params }` signature. The new importer route (`/api/extract`) and `import-job` page are **not** dynamic and don't add to this.
 - **Recommended minimal fix:** update the three handlers to `({ params }: { params: Promise<{ id: string }> })` and `await params`. (See `apps/dashboard/AGENTS.md`: "This is NOT the Next.js you know.")
 - **Files likely affected:** `apps/dashboard/src/app/api/jobs/[id]/route.ts`, `.../approve/route.ts`, `.../reject/route.ts`.
+
+</details>
 
 ---
 

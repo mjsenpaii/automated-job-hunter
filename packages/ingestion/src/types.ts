@@ -1,3 +1,5 @@
+import type { StructuredScore } from '@job-app/core';
+
 export interface RawJobInput {
   source_name: string;
   source_job_id?: string;
@@ -31,6 +33,8 @@ export interface IngestionResult {
   duplicate_of_id?: string;
   error?: string;
   normalized_job?: any;
+  /** Full structured score (factors, matched/missing skills, risk flags, reason). */
+  score_detail?: StructuredScore;
 }
 
 export interface SourceAdapter {

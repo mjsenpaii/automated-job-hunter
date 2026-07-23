@@ -18,6 +18,35 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Workspace packages & build strategy
+
+**The workspace packages (`@job-app/core`, `@job-app/db`, `@job-app/classification`,
+`@job-app/scoring`, `@job-app/ingestion`) are consumed as COMPILED `dist` output**, not as raw
+TypeScript source. Each package's `package.json` `main`/`types`/`exports` point at `dist/*.js` /
+`dist/*.d.ts`, and their relative imports keep explicit `.js` specifiers (valid Node ESM). This is
+the single, consistent strategy for the whole repo:
+
+- **Do NOT** add `transpilePackages` for these packages or try to make Turbopack consume their
+  `src/*.ts`. Next 16.2's Turbopack cannot map `.js` → `.ts` for workspace source
+  (`resolveExtensionAlias` isn't recognized on this version), which is what originally broke the
+  build. Consuming `dist` sidesteps this entirely.
+- **Build packages before running the dashboard.** `pnpm build` (Turbo) builds all packages first
+  via `dependsOn: ["^build"]`, then the dashboard. If you run `pnpm --filter @job-app/dashboard dev`
+  or `... build` directly, run `pnpm build` (or build the packages) at least once first so `dist`
+  exists. Editing package source requires a rebuild to take effect in the dashboard.
+- **Tests are unaffected:** Vitest resolves `@job-app/*` to `src` via its own config aliases, so the
+  141-test suite always runs against source regardless of the `dist` strategy.
+
+### Database
+
+`@job-app/db` uses `better-sqlite3` (native). It must have a binary for your Node version:
+`better-sqlite3 >= 12` ships prebuilt binaries for Node 24, so a normal `pnpm install` provisions it
+(the package is approved to run its install script via `allowBuilds` in `pnpm-workspace.yaml`). No
+C++ toolchain is required. The dashboard opens the SQLite file lazily (in request handlers, not at
+import) and `getDb()` calls `ensureSchema()` to create tables on first connect, so `/api/stats` and
+`/api/jobs` return valid JSON against a fresh `data/app.db`. API routes always return structured
+JSON (including errors) — never HTML 500s.
+
 ## Import a job from a URL
 
 The dashboard can import a public job posting directly from its URL.

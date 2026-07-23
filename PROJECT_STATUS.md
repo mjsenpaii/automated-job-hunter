@@ -1,9 +1,9 @@
 # Project Status
 
-**Last updated:** 2026-07-24T03:35 PHT  
-**Current phase:** Phase 5 Complete + Job URL Importer & Automated Scoring Validation integrated  
-**Overall health:** 🟢 141/141 tests passing (18 files)  
-**Active branch:** `handoff/cursor-integration`
+**Last updated:** 2026-07-24T04:10 PHT  
+**Current phase:** Phase 5 Complete + URL Importer/Validation integrated + Dashboard build & runtime fixed  
+**Overall health:** 🟢 141/141 tests passing (18 files) · `pnpm build` green · dashboard build + runtime green  
+**Active branch:** `fix/dashboard-build-runtime`
 
 ---
 
@@ -30,10 +30,10 @@
 | `@job-app/classification` | PH/intl category, work-setup, eligibility, dedup | 32 ✅ |
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 24 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
-| `@job-app/db` | Drizzle ORM + SQLite | Schema ready |
+| `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
 | `@job-app/ingestion` | Normalizer, pipeline, manual + **URL-import adapter (SSRF-hardened)**, realistic validation | 57 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
-| `@job-app/dashboard` | Next.js premium dark UI + **Import URL page & `/api/extract`** | Running |
+| `@job-app/dashboard` | Next.js premium dark UI + **Import URL page & `/api/extract`** + `ingestJob`-backed `/api/jobs` | Build + runtime green |
 
 ### Generated Artifacts
 - `resumes/generated/resume-software-developer.docx` (8.9 KB)
@@ -49,7 +49,33 @@
 | `84eb678` | Phase 2 — ingestion + dashboard wiring | 77 |
 | `5540f9f` | Phase 4-5 — DOCX resumes + application packages | 90 |
 | `b003fb8` | wip: preserve AGY URL importer and validation work | 114 |
-| _(this commit)_ | feat: complete job URL importer and automated scoring validation | 141 |
+| `ea3b565` | feat: complete job URL importer and automated scoring validation | 141 |
+| _(pending)_ | fix: dashboard build & runtime (workspace packages, DB, API routes) | 141 |
+
+---
+
+## Session — Dashboard Build & Runtime Fix (`fix/dashboard-build-runtime`)
+
+The dashboard previously failed at production build and runtime (workspace packages, deps and
+API-route imports were not integrated). All fixed without changing the URL-importer/validation
+behavior or the 141 tests. Verified: `pnpm test` (141), `pnpm build` (6/6), all package builds,
+`pnpm --filter @job-app/dashboard build`, `next dev` boots, and `/`, `/import-job`, `/api/stats`,
+`/api/jobs`, `/api/jobs/[id]`, `/api/extract` all respond (JSON where expected). SSRF block and
+Confirm & Score (real ingestion pipeline, score persisted) confirmed working.
+
+**Workspace-package strategy (now single & consistent):** packages are compiled to `dist` (Node ESM)
+and consumed as compiled output (`main`/`types`/`exports` → `dist`). Turbopack cannot map `.js`→`.ts`
+for workspace source on Next 16.2, so `transpilePackages` is intentionally **not** used. Vitest still
+resolves `@job-app/*` → `src` via its aliases, so tests are unaffected. See
+`apps/dashboard/README.md` → "Workspace packages & build strategy".
+
+Key changes: root `packageManager` (unblocks Turbo); `pnpm-workspace.yaml` `allowBuilds` set
+(pnpm 11); `@job-app/db` `exports`/`dist` entry points + `ensureSchema()` auto-provisioning + lazy
+DB open; `better-sqlite3 9→^12` (Node-24 prebuilt binary — approved by user); `drizzle-orm` +
+`@job-app/ingestion` declared in the dashboard; `api/jobs` POST now calls the real `ingestJob`
+pipeline (removed nonexistent `classifyJob`); Next 16 async `params`; structured JSON errors;
+hidden unimplemented sidebar links; `@types/node` + build-config fixes so all `tsc` package builds
+pass. `IngestionResult` additively exposes `score_detail` (full `StructuredScore`).
 
 ---
 

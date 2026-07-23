@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDatabase } from '@/lib/db';
 import { jobs, job_scores } from '@job-app/db/schema';
 import { sql } from 'drizzle-orm';
 
 export async function GET() {
   try {
+    const db = getDatabase();
     const statsResult = await db.select({
       totalJobs: sql<number>`count(${jobs.id})`,
       shortlistedJobs: sql<number>`sum(case when ${jobs.status} = 'USER_APPROVED' then 1 else 0 end)`,

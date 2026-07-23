@@ -66,7 +66,8 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       status: 'INGESTED',
       score: scoreResult.score,
       recommendation: scoreResult.recommendation,
-      normalized_job: normalized
+      normalized_job: normalized,
+      score_detail: scoreResult
     };
   } catch (error: any) {
     console.error("Pipeline Error:", error);

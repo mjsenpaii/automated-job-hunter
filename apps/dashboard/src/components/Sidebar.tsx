@@ -12,8 +12,8 @@ export default function Sidebar() {
     { label: 'Import URL', href: '/import-job' },
     { label: 'PH Jobs', href: '/ph-jobs' },
     { label: 'International Jobs', href: '/intl-jobs' },
-    { label: 'Applications', href: '/applications' },
-    { label: 'Resume Profiles', href: '/profiles' },
+    // 'Applications' (/applications) and 'Resume Profiles' (/profiles) are intentionally
+    // hidden until those pages are implemented (avoids dead links / 404s).
   ];
 
   return (
