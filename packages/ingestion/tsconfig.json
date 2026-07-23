@@ -2,11 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
-    "baseUrl": ".",
-    "paths": {
-      "@job-app/*": ["../*/src"]
-    }
+    "rootDir": "src"
   },
-  "include": ["src", "tests"]
+  "include": ["src"],
+  "comment": "Only `src` is compiled for the library build. `tests/**` and the `generate-validation-report` script are exercised by Vitest, not the build. The script imports repo-root test fixtures that live outside this package's rootDir.",
+  "exclude": ["node_modules", "dist", "src/generate-validation-report.ts"]
 }

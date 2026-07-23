@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDatabase } from '@/lib/db';
 import { jobs, job_scores } from '@job-app/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
+    const db = getDatabase();
     const jobResult = await db
       .select({
         job: jobs,
@@ -12,7 +14,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
       })
       .from(jobs)
       .leftJoin(job_scores, eq(jobs.id, job_scores.job_id))
-      .where(eq(jobs.id, params.id))
+      .where(eq(jobs.id, id))
       .limit(1);
 
     if (!jobResult || jobResult.length === 0) {

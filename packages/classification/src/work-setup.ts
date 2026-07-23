@@ -26,7 +26,7 @@ const ONSITE_SIGNALS = [
 ];
 
 const HYBRID_SIGNALS = [
-  'hybrid', 'flexible', 'mix of remote and onsite',
+  'hybrid', 'mix of remote and onsite',
   'days in office', 'days remote', 'partial remote',
   'remote with occasional', 'some onsite',
 ];

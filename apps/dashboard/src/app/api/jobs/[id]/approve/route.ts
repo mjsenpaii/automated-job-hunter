@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDatabase } from '@/lib/db';
 import { jobs } from '@job-app/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const db = getDatabase();
     await db
       .update(jobs)
       .set({ status: 'USER_APPROVED' })

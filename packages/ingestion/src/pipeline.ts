@@ -16,7 +16,8 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       return {
         job_id: normalized.id,
         status: 'DUPLICATE',
-        duplicate_of_id: dupCheck.duplicate_of_id ?? undefined
+        duplicate_of_id: dupCheck.duplicate_of_id ?? undefined,
+        normalized_job: normalized
       };
     }
 
@@ -31,7 +32,7 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
     normalized.work_setup_evidence = workSetupResult.evidence;
 
     // 6. Check eligibility
-    const eligibilityResult = checkEligibility(normalized);
+    const eligibilityResult = checkEligibility(normalized, category, workSetupResult.work_setup);
     normalized.eligibility_status = eligibilityResult.status;
 
     // 7. Check hard rejection
@@ -44,7 +45,8 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       return {
         job_id: normalized.id,
         status: 'HARD_REJECTED',
-        rejection_reasons: hardRejectResult.reasons
+        rejection_reasons: hardRejectResult.reasons,
+        normalized_job: normalized
       };
     }
 
@@ -63,7 +65,9 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       job_id: normalized.id,
       status: 'INGESTED',
       score: scoreResult.score,
-      recommendation: scoreResult.recommendation
+      recommendation: scoreResult.recommendation,
+      normalized_job: normalized,
+      score_detail: scoreResult
     };
   } catch (error: any) {
     console.error("Pipeline Error:", error);

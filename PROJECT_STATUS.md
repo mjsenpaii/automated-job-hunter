@@ -1,8 +1,9 @@
 # Project Status
 
-**Last updated:** 2026-07-23T20:56 PHT  
-**Current phase:** Phase 1-3 Complete  
-**Overall health:** 🟢 ALL SYSTEMS GREEN — 71/71 tests passing
+**Last updated:** 2026-07-24T04:10 PHT  
+**Current phase:** Phase 5 Complete + URL Importer/Validation integrated + Dashboard build & runtime fixed  
+**Overall health:** 🟢 141/141 tests passing (18 files) · `pnpm build` green · dashboard build + runtime green  
+**Active branch:** `fix/dashboard-build-runtime`
 
 ---
 
@@ -10,78 +11,87 @@
 
 | Phase | Status | Notes |
 |---|---|---|
-| Phase 0 — Audit & Profile | ✅ DONE | All docs, candidate profiles, questionnaire complete |
-| Phase 1 — Foundation & Tests | ✅ DONE | Monorepo, schemas, classification, scoring, database |
-| Phase 2 — Job Discovery | ⬜ NOT STARTED | Source adapters needed |
-| Phase 3 — Dashboard | ✅ SCAFFOLD DONE | Next.js app with premium dark theme, mock data |
-| Phase 4 — Resume Engine | ✅ FOUNDATION DONE | Profiles, sections, fact-mapper, quality gates |
-| Phase 5 — Application Package | ⬜ NOT STARTED | |
-| Phase 6 — Browser Assistance | ⬜ NOT STARTED | |
-| Phase 7 — Limited Automation | ⬜ NOT STARTED | |
+| Phase 0 — Audit & Profile | ✅ DONE | Docs, candidate profiles, questionnaire |
+| Phase 1 — Foundation & Tests | ✅ DONE | Monorepo, schemas, classification, scoring, DB |
+| Phase 2 — Job Discovery | ✅ DONE | Ingestion pipeline, API routes, add-job form |
+| Phase 3 — Dashboard | ✅ DONE | Next.js premium dark UI, wired to real DB |
+| Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
+| Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
+| Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
+| Phase 7 — Limited Automation | ⬜ NOT STARTED | Trigger.dev orchestration |
 
 ---
 
-## What's Built
+## What's Built — 8 Packages + 1 App
 
-### Packages (5)
 | Package | Purpose | Tests |
 |---|---|---|
-| `@job-app/core` | Zod schemas (candidate, job, scoring types) | Schemas used by all packages |
-| `@job-app/classification` | PH/intl category, work-setup, eligibility, dedup | 32 tests ✅ |
-| `@job-app/scoring` | Hard rejection rules, 100-point factor scoring | 24 tests ✅ |
-| `@job-app/resume` | Resume profiles, section generators, quality gates | 15 tests ✅ |
-| `@job-app/db` | Drizzle ORM + SQLite (jobs, scores, apps, activity log) | Schema ready |
+| `@job-app/core` | Zod schemas (candidate, job, scoring) | Used by all |
+| `@job-app/classification` | PH/intl category, work-setup, eligibility, dedup | 32 ✅ |
+| `@job-app/scoring` | Hard rejection, 100-point factor scoring | 24 ✅ |
+| `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
+| `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
+| `@job-app/ingestion` | Normalizer, pipeline, manual + **URL-import adapter (SSRF-hardened)**, realistic validation | 57 ✅ |
+| `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
+| `@job-app/dashboard` | Next.js premium dark UI + **Import URL page & `/api/extract`** + `ingestJob`-backed `/api/jobs` | Build + runtime green |
 
-### Apps (1)
-| App | Purpose | Status |
-|---|---|---|
-| `@job-app/dashboard` | Next.js premium dark UI | Scaffold with mock data |
-
-### Test Results
-```
-✓ @job-app/resume          tests/quality-gates.test.ts        (6 tests)
-✓ @job-app/scoring         tests/hard-reject.test.ts          (11 tests)
-✓ @job-app/scoring         tests/factor-scoring.test.ts       (13 tests)
-✓ @job-app/resume          tests/section-generators.test.ts   (7 tests)
-✓ @job-app/classification  tests/eligibility.test.ts          (8 tests)
-✓ @job-app/classification  tests/category.test.ts             (10 tests)
-✓ @job-app/classification  tests/deduplication.test.ts        (5 tests)
-✓ @job-app/classification  tests/work-setup.test.ts           (9 tests)
-✓ @job-app/resume          tests/profiles.test.ts             (2 tests)
-
-Test Files  9 passed (9)
-     Tests  71 passed (71)
-```
+### Generated Artifacts
+- `resumes/generated/resume-software-developer.docx` (8.9 KB)
+- `resumes/generated/resume-technical-support.docx` (9.0 KB)
 
 ---
 
-## Verified Candidate Facts
+## Git Log
 
-| Fact | Value | Source |
+| Commit | Description | Tests |
 |---|---|---|
-| Graduated | May 29, 2026 | USER_CONFIRMED |
-| HAPAG stack | FlutterFlow + Supabase + custom Dart + APIs | USER_CONFIRMED |
-| OJT work | EIS microservices, TypeScript APIs for DOST | USER_CONFIRMED |
-| OJT structure | LODIXR hybrid: Central Office (WFH) + Marinduque (onsite) | USER_CONFIRMED |
-| Code Master Award | App built for DOST-Marinduque | USER_CONFIRMED |
-| WPDG | Freelance Flutter apps (Paampom-Hangout, Circles) | USER_CONFIRMED |
-| DotOrbit | Early-stage dev group — capstone work **excluded** | USER_CONFIRMED |
-| GitHub | https://github.com/mjsenpaii | VERIFIED |
-| LinkedIn | https://www.linkedin.com/in/mend4x/ | USER_CONFIRMED |
+| `415c527` | Phase 0-3 foundation | 71 |
+| `84eb678` | Phase 2 — ingestion + dashboard wiring | 77 |
+| `5540f9f` | Phase 4-5 — DOCX resumes + application packages | 90 |
+| `b003fb8` | wip: preserve AGY URL importer and validation work | 114 |
+| `ea3b565` | feat: complete job URL importer and automated scoring validation | 141 |
+| _(pending)_ | fix: dashboard build & runtime (workspace packages, DB, API routes) | 141 |
 
 ---
 
-## Decisions Log
+## Session — Dashboard Build & Runtime Fix (`fix/dashboard-build-runtime`)
 
-| # | Decision | Date |
-|---|---|---|
-| D-001 | Drizzle ORM over Prisma | 2026-07-23 |
-| D-002 | pnpm + Turborepo monorepo | 2026-07-23 |
-| D-003 | Trigger.dev over Windows Task Scheduler | 2026-07-23 |
-| D-004 | Start with 2 resume profiles | 2026-07-23 |
-| D-005 | Defer Playwright to Phase 6 | 2026-07-23 |
-| D-006 | SQLite with WAL mode | 2026-07-23 |
-| D-007 | Frame WPDG as freelance work | 2026-07-23 |
-| D-008 | Consolidate OJT into one entry | 2026-07-23 |
-| D-009 | Exclude DotOrbit capstone work | 2026-07-23 |
-| D-010 | TypeScript is verified professional skill | 2026-07-23 |
+The dashboard previously failed at production build and runtime (workspace packages, deps and
+API-route imports were not integrated). All fixed without changing the URL-importer/validation
+behavior or the 141 tests. Verified: `pnpm test` (141), `pnpm build` (6/6), all package builds,
+`pnpm --filter @job-app/dashboard build`, `next dev` boots, and `/`, `/import-job`, `/api/stats`,
+`/api/jobs`, `/api/jobs/[id]`, `/api/extract` all respond (JSON where expected). SSRF block and
+Confirm & Score (real ingestion pipeline, score persisted) confirmed working.
+
+**Workspace-package strategy (now single & consistent):** packages are compiled to `dist` (Node ESM)
+and consumed as compiled output (`main`/`types`/`exports` → `dist`). Turbopack cannot map `.js`→`.ts`
+for workspace source on Next 16.2, so `transpilePackages` is intentionally **not** used. Vitest still
+resolves `@job-app/*` → `src` via its aliases, so tests are unaffected. See
+`apps/dashboard/README.md` → "Workspace packages & build strategy".
+
+Key changes: root `packageManager` (unblocks Turbo); `pnpm-workspace.yaml` `allowBuilds` set
+(pnpm 11); `@job-app/db` `exports`/`dist` entry points + `ensureSchema()` auto-provisioning + lazy
+DB open; `better-sqlite3 9→^12` (Node-24 prebuilt binary — approved by user); `drizzle-orm` +
+`@job-app/ingestion` declared in the dashboard; `api/jobs` POST now calls the real `ingestJob`
+pipeline (removed nonexistent `classifyJob`); Next 16 async `params`; structured JSON errors;
+hidden unimplemented sidebar links; `@types/node` + build-config fixes so all `tsc` package builds
+pass. `IngestionResult` additively exposes `score_detail` (full `StructuredScore`).
+
+---
+
+## Session — Job URL Importer & Automated Scoring Validation
+
+Integrated two parallel work streams on branch `handoff/cursor-integration`:
+
+**1. Job URL importer** (`packages/ingestion/src/adapters/url-extractor.ts`, dashboard `import-job` page + `/api/extract`):
+- Public job-URL fetch → JSON-LD / meta-tag / HTML-heuristic extraction → editable preview → save & score.
+- **SSRF hardened** during integration: http/https only; localhost/`*.local` blocking; full private/loopback/link-local/CGNAT/multicast IPv4 blocking (incl. `169.254.169.254`); IPv6 loopback/ULA/link-local + IPv4-mapped blocking; **DNS-resolution validation**; **per-redirect-hop re-validation**; request timeout; **response-size cap (2 MB)**. No authenticated scraping, no CAPTCHA bypass, no application submission.
+
+**2. Automated scoring validation** (`packages/ingestion/tests/validation-realistic.test.ts`, `generate-validation-report.ts`, `docs/AUTOMATED_JOB_VALIDATION_REPORT.md`):
+- All 8 realistic scenarios execute through the **real** `ingestJob` production pipeline.
+- Production bug fixed: `pipeline.ts` now calls `checkEligibility(normalized, category, workSetup)` (was 1-arg → eligibility never evaluated).
+- `work-setup.ts`: removed generic `'flexible'` HYBRID signal (fixed Scenario 1 REMOTE mis-classification).
+
+**Test delta:** 114 (preserved) → **141** (+25 SSRF regression tests, +2 report-verification tests).
+
+> ⚠️ Pre-existing build-infra failures (turbo/tsc/`next build`) are **out of scope** for this commit — see `NEXT_ACTIONS.md`.
