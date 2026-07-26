@@ -30,6 +30,7 @@ export const jobs = sqliteTable('jobs', {
   category: text('category'), // PH or INTERNATIONAL
   eligibility_status: text('eligibility_status'),
   status: text('status').notNull(), // job pipeline status
+  rejection_reasons: text('rejection_reasons'), // JSON array of HardRejectReason; null unless hard-rejected
   raw_snapshot: text('raw_snapshot'),
   created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),

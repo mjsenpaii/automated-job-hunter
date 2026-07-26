@@ -38,6 +38,19 @@ describe('checkHardReject', () => {
     expect(result.reasons).toContain('SENIORITY_MISMATCH');
   });
 
+  it('rejects a role requiring 5+ years for a fresh graduate', () => {
+    const fiveYearRole = {
+      ...PH_REMOTE_MANILA,
+      title: 'Senior Frontend Engineer',
+      description: 'Senior Frontend Engineer. 5+ years of React and TypeScript experience required.',
+      seniority: 'SENIOR' as const,
+      years_experience_min: 5,
+    };
+    const result = checkHardReject(fiveYearRole);
+    expect(result.rejected).toBe(true);
+    expect(result.reasons).toContain('SENIORITY_MISMATCH');
+  });
+
   it('rejects job requiring security clearance', () => {
     const result = checkHardReject(REQUIRES_CLEARANCE);
     expect(result.rejected).toBe(true);

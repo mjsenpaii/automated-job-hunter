@@ -22,10 +22,17 @@ const SCAM_PATTERNS = [
   'no experience needed guaranteed',
 ];
 
-/** Seniority markers indicating roles far beyond a fresh graduate */
+/**
+ * Seniority markers indicating roles far beyond a fresh graduate (<1 year).
+ * A minimum requirement of 5+ years is out of reach for the candidate, so the
+ * 5/6/7-year phrasings are treated as hard mismatches alongside the 8/10-year ones.
+ */
 const SENIOR_MARKERS = [
   '10+ years', '10 years of experience',
   '8+ years', '8 years of experience',
+  '7+ years', '7 years of experience',
+  '6+ years', '6 years of experience',
+  '5+ years', '5 years of experience',
   'principal engineer', 'staff engineer',
   'director of engineering', 'vp of engineering',
   'chief technology officer', 'cto',
@@ -140,8 +147,10 @@ export function checkHardReject(
     }
   }
 
-  // 11. Years of experience check from structured field
-  if (job.years_experience_min !== null && job.years_experience_min >= 8) {
+  // 11. Years of experience check from structured field.
+  // A fresh graduate has <1 year, so any role demanding a 5+ year minimum is a
+  // seniority mismatch (matches validation Scenario 7).
+  if (job.years_experience_min !== null && job.years_experience_min >= 5) {
     if (!reasons.includes('SENIORITY_MISMATCH')) {
       reasons.push('SENIORITY_MISMATCH');
       evidence.push(`Requires ${job.years_experience_min}+ years — candidate has <1 year`);

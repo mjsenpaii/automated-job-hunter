@@ -1,23 +1,37 @@
-export default function FactorChart({ factors }: { factors: Record<string, number> }) {
+export interface FactorDatum {
+  /** Human-readable factor label. */
+  name: string;
+  /** Actual persisted points scored for this factor. */
+  value: number;
+  /** Maximum points this factor can contribute (100-point model). */
+  max: number;
+}
+
+/**
+ * Renders factor bars from ACTUAL persisted scoring results. Each factor is
+ * shown against its real maximum (e.g. `18/25`), not a fabricated `/100`.
+ */
+export default function FactorChart({ factors }: { factors: FactorDatum[] }) {
   return (
     <div className="factor-chart">
-      {Object.entries(factors).map(([factor, score]) => {
+      {factors.map(({ name, value, max }) => {
+        const pct = max > 0 ? Math.round((value / max) * 100) : 0;
         let color = 'var(--score-poor)';
-        if (score >= 85) color = 'var(--score-excellent)';
-        else if (score >= 75) color = 'var(--score-good)';
-        else if (score >= 65) color = 'var(--score-average)';
+        if (pct >= 85) color = 'var(--score-excellent)';
+        else if (pct >= 75) color = 'var(--score-good)';
+        else if (pct >= 65) color = 'var(--score-average)';
 
         return (
-          <div key={factor} className="factor-row">
+          <div key={name} className="factor-row">
             <div className="factor-label">
-              <span className="factor-name">{factor.replace(/_/g, ' ')}</span>
-              <span className="factor-score" style={{ color }}>{score}/100</span>
+              <span className="factor-name">{name}</span>
+              <span className="factor-score" style={{ color }}>{value}/{max}</span>
             </div>
             <div className="factor-bar-bg">
               <div 
                 className="factor-bar-fill" 
                 style={{ 
-                  width: `${score}%`,
+                  width: `${pct}%`,
                   backgroundColor: color
                 }} 
               />

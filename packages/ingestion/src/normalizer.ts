@@ -37,7 +37,7 @@ export function normalizeJob(raw: RawJobInput): NormalizedJob {
     salary_currency,
     salary_period,
     seniority: mapSeniority(raw.seniority_hint),
-    years_experience_min: null,
+    years_experience_min: parseYearsExperience(`${raw.title} ${raw.description}`),
     years_experience_max: null,
     required_skills: raw.required_skills ?? [],
     preferred_skills: raw.preferred_skills ?? [],
@@ -51,6 +51,43 @@ export function normalizeJob(raw: RawJobInput): NormalizedJob {
     status: 'DISCOVERED',
     raw_snapshot: raw.raw_html ?? null,
   };
+}
+
+/**
+ * Extracts the minimum years of professional experience a listing demands.
+ *
+ * Only matches explicit experience phrasing ("5+ years", "at least 5 years",
+ * "5 years of experience", "5-7 years") — never bare numbers — to avoid false
+ * positives (e.g. "13th month pay"). Returns the highest stated minimum, since
+ * that is the binding requirement a candidate must meet. Returns `null` when no
+ * experience requirement is stated (the value is not invented).
+ */
+export function parseYearsExperience(text: string): number | null {
+  const lower = text.toLowerCase();
+  const found: number[] = [];
+
+  const patterns: RegExp[] = [
+    // "5+ years", "5 + yrs"
+    /(\d{1,2})\s*\+\s*(?:years?|yrs?)/g,
+    // "at least 5 years", "minimum of 5 years", "min 5 yrs"
+    /(?:at least|minimum(?:\s+of)?|min\.?)\s+(\d{1,2})\s*\+?\s*(?:years?|yrs?)/g,
+    // "5 years of experience", "5 yrs experience", "5 years' experience"
+    /(\d{1,2})\s*\+?\s*(?:years?|yrs?)['’]?\s+(?:of\s+)?(?:[a-z0-9,\/&.\- ]{0,40}?\s+)?experience/g,
+    // range "5-7 years" / "5 to 7 years" -> lower bound is the minimum
+    /(\d{1,2})\s*(?:-|to)\s*\d{1,2}\s*(?:years?|yrs?)/g,
+  ];
+
+  for (const re of patterns) {
+    for (const match of lower.matchAll(re)) {
+      const captured = match[1];
+      if (captured === undefined) continue;
+      const n = parseInt(captured, 10);
+      if (!Number.isNaN(n) && n > 0 && n <= 50) found.push(n);
+    }
+  }
+
+  if (found.length === 0) return null;
+  return Math.max(...found);
 }
 
 function parseSalary(text?: string) {

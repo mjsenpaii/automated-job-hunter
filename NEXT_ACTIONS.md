@@ -1,7 +1,7 @@
 # Next Actions
 
-**Last updated:** 2026-07-24T04:10 PHT
-**Current state:** 141/141 tests passing (18 files). URL importer + validation integrated, and the **dashboard build & runtime are now fixed** on branch `fix/dashboard-build-runtime`. `pnpm build` is green, all package builds pass, and the dashboard builds and runs.
+**Last updated:** 2026-07-26T22:30 PHT
+**Current state:** 172/172 tests passing (21 files). Import-flow reliability/UX pass is implemented locally (awaiting commit approval): null-safe scoring UI, shared Zod contracts, required-field completion, error boundary, duplicate detection against DB.
 
 ---
 
@@ -23,13 +23,20 @@ Then open http://localhost:3000. **Import URL** page: http://localhost:3000/impo
 ### Quick test of the URL importer
 1. Start the dashboard (command above).
 2. Go to **Import URL** in the sidebar (`/import-job`).
-3. Paste a public job-posting URL (a page with JSON-LD `JobPosting` works best, e.g. a Greenhouse/Lever posting) and click **Extract Job Data**.
-4. Review/edit the extracted fields in the preview, then **Confirm & Score**.
-5. Expect a category / work-setup / eligibility / score result. Private, loopback, and link-local URLs (e.g. `http://169.254.169.254/`, `http://localhost`) are rejected before any fetch.
+3. Paste a public job-posting URL and click **Scan posting**.
+4. If required fields are missing, complete the highlighted inputs, then **Confirm and score**.
+5. Hard-rejected / ineligible jobs show **Not evaluated** plus rejection reasons (never a fake score).
+6. Private, loopback, and link-local URLs remain blocked before any fetch.
 
 Fast unit check of the extractor + SSRF guards (no network):
 ```powershell
 pnpm --filter @job-app/ingestion exec vitest run tests/url-extractor.test.ts
+```
+
+Fast check of import contracts / UI state helpers:
+```powershell
+pnpm --filter @job-app/ingestion exec vitest run tests/import-contracts.test.ts
+pnpm --filter @job-app/dashboard exec vitest run
 ```
 
 ---

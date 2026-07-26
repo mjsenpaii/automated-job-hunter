@@ -41,4 +41,37 @@ describe('normalizer', () => {
     const job = normalizeJob(raw);
     expect(job.work_setup).toBe('REMOTE');
   });
+
+  it('should parse "5+ years" experience requirement from the description', () => {
+    const raw: RawJobInput = {
+      source_name: 'test',
+      title: 'Senior Frontend Engineer',
+      company: 'Test Co',
+      description: 'We need 5+ years of React and TypeScript experience.',
+    };
+    const job = normalizeJob(raw);
+    expect(job.years_experience_min).toBe(5);
+  });
+
+  it('should return the highest stated minimum when several are present', () => {
+    const raw: RawJobInput = {
+      source_name: 'test',
+      title: 'Senior Software Engineer',
+      company: 'Test Co',
+      description: 'At least 5 years of backend experience. Must have 8+ years with Java.',
+    };
+    const job = normalizeJob(raw);
+    expect(job.years_experience_min).toBe(8);
+  });
+
+  it('should NOT invent a years requirement from unrelated numbers', () => {
+    const raw: RawJobInput = {
+      source_name: 'test',
+      title: 'Junior Developer',
+      company: 'Test Co',
+      description: 'Fresh graduates welcome. We offer HMO and 13th month pay.',
+    };
+    const job = normalizeJob(raw);
+    expect(job.years_experience_min).toBeNull();
+  });
 });

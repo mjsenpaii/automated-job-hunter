@@ -52,6 +52,7 @@ export function ensureSchema(sqlite: Database.Database): void {
       category TEXT,
       eligibility_status TEXT,
       status TEXT NOT NULL,
+      rejection_reasons TEXT,
       raw_snapshot TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -105,4 +106,11 @@ export function ensureSchema(sqlite: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Defensive, idempotent column migration for databases created before
+  // `rejection_reasons` existed (CREATE TABLE IF NOT EXISTS won't add columns).
+  const jobsColumns = sqlite.prepare(`PRAGMA table_info(jobs)`).all() as { name: string }[];
+  if (!jobsColumns.some((c) => c.name === 'rejection_reasons')) {
+    sqlite.exec(`ALTER TABLE jobs ADD COLUMN rejection_reasons TEXT`);
+  }
 }

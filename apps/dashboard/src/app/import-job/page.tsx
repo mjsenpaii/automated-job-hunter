@@ -1,367 +1,527 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { ExtractedJobData, ExtractionResult } from '@job-app/ingestion';
+import type { ConfirmRequiredField, ExtractedJobData, JobImportResult } from '@job-app/ingestion/import-contracts';
+import {
+  getMissingConfirmFields,
+  validateConfirmScoreRequest,
+} from '@job-app/ingestion/import-contracts';
+import { postConfirmScore, postExtract } from '@/lib/import/safe-fetch';
+import {
+  deriveResultState,
+  deriveReviewState,
+  isValidHttpUrl,
+  type ImportUiState,
+} from '@/lib/import/form-state';
+import { ImportField, displayOrFallback } from './ImportField';
+import { ImportResultPanel } from './ImportResultPanel';
+import { IMPORT_STYLES } from './import-styles';
 
-type Step = 'input' | 'preview' | 'result';
+type FormDraft = {
+  title: string;
+  company: string;
+  description: string;
+  url: string;
+  country: string;
+  city: string;
+  work_setup: 'REMOTE' | 'HYBRID' | 'ONSITE' | 'TEMPORARY_REMOTE' | 'UNCLEAR';
+  employment_type: string;
+  skills: string;
+  salary_text: string;
+  seniority: string;
+};
+
+const EMPTY_DRAFT: FormDraft = {
+  title: '',
+  company: '',
+  description: '',
+  url: '',
+  country: '',
+  city: '',
+  work_setup: 'UNCLEAR',
+  employment_type: '',
+  skills: '',
+  salary_text: '',
+  seniority: '',
+};
+
+function draftFromExtraction(data: ExtractedJobData, fallbackUrl: string): FormDraft {
+  const work = (data.work_setup ?? 'UNCLEAR').toUpperCase();
+  const work_setup: FormDraft['work_setup'] =
+    work === 'REMOTE' ||
+    work === 'HYBRID' ||
+    work === 'ONSITE' ||
+    work === 'TEMPORARY_REMOTE'
+      ? work
+      : 'UNCLEAR';
+
+  return {
+    title: data.title?.trim() ?? '',
+    company: data.company?.trim() ?? '',
+    description: data.description?.trim() ?? '',
+    url: data.source_url?.trim() || fallbackUrl,
+    country: data.country?.trim() ?? '',
+    city: data.city?.trim() ?? '',
+    work_setup,
+    employment_type: data.employment_type?.trim() ?? '',
+    skills: [...(data.required_skills ?? []), ...(data.preferred_skills ?? [])]
+      .filter(Boolean)
+      .join(', '),
+    salary_text: data.salary_text?.trim() ?? '',
+    seniority: data.seniority?.trim() ?? '',
+  };
+}
 
 export default function ImportJobPage() {
-  const [step, setStep] = useState<Step>('input');
+  const formId = useId();
+  const firstErrorRef = useRef<HTMLInputElement | null>(null);
+  const scoringLock = useRef(false);
+
+  const [uiState, setUiState] = useState<ImportUiState>('IDLE');
   const [url, setUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  const [extractedData, setExtractedData] = useState<ExtractedJobData | null>(null);
-  const [formData, setFormData] = useState<Partial<ExtractedJobData>>({});
-  
-  const [result, setResult] = useState<any>(null);
+  const [draft, setDraft] = useState<FormDraft>(EMPTY_DRAFT);
+  const [extracted, setExtracted] = useState<ExtractedJobData | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<JobImportResult | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      setUrl(text);
-    } catch (err) {
-      console.error('Failed to read clipboard contents: ', err);
+  const missingRequired = useMemo(
+    () => getMissingConfirmFields(draft),
+    [draft],
+  );
+
+  const updateField = useCallback(<K extends keyof FormDraft>(key: K, value: FormDraft[K]) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+    setFieldErrors((prev) => {
+      if (!prev[key] && key !== 'country' && key !== 'city') return prev;
+      const next = { ...prev };
+      delete next[key];
+      if (key === 'country' || key === 'city') delete next.country;
+      return next;
+    });
+  }, []);
+
+  const focusFirstInvalid = useCallback((errors: Record<string, string>) => {
+    const order = ['title', 'company', 'description', 'url', 'country', 'city', 'work_setup'];
+    const first = order.find((k) => errors[k]);
+    if (!first) return;
+    const el = document.getElementById(`${formId}-${first}`);
+    if (el && 'focus' in el) {
+      (el as HTMLElement).focus();
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (firstErrorRef.current) {
+      firstErrorRef.current.focus();
     }
-  };
+  }, [formId]);
 
-  const handleExtract = async (e: React.FormEvent) => {
+  const handleScan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
-      
-      const data: ExtractionResult = await res.json();
-      
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Failed to extract job data.');
-      } else if (data.data) {
-        setExtractedData(data.data);
-        setFormData(data.data);
-        setStep('preview');
-      }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during extraction.');
-    } finally {
-      setLoading(false);
+    if (!isValidHttpUrl(url) || uiState === 'SCANNING') return;
+
+    setUiState('SCANNING');
+    setErrorMessage(null);
+    setStatusMessage('Reading the job posting…');
+    setImportResult(null);
+    setFieldErrors({});
+
+    const res = await postExtract(url.trim());
+    if (!res.ok) {
+      setUiState('ERROR');
+      setErrorMessage(res.error.message);
+      setStatusMessage(null);
+      return;
     }
+
+    if (!res.data.data) {
+      setUiState('ERROR');
+      setErrorMessage(res.data.error || 'Failed to extract job data.');
+      setStatusMessage(null);
+      return;
+    }
+
+    const nextDraft = draftFromExtraction(res.data.data, url.trim());
+    setExtracted(res.data.data);
+    setDraft(nextDraft);
+    setWarnings(res.data.warnings ?? []);
+    const missing = getMissingConfirmFields(nextDraft);
+    setUiState(deriveReviewState(missing));
+    setStatusMessage(
+      missing.length > 0
+        ? 'We found the posting, but some required details are missing. Complete the highlighted fields before scoring.'
+        : 'Review extracted details, then confirm and score.',
+    );
+    setErrorMessage(null);
   };
 
   const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    
-    const submitData = {
-      title: formData.title || '',
-      company: formData.company || '',
-      description: formData.description || '',
-      url: extractedData?.source_url || url,
-      country: formData.country || '',
-      city: formData.city || '',
-      work_setup: formData.work_setup || 'UNCLEAR',
-      skills: [...(formData.required_skills || []), ...(formData.preferred_skills || [])].join(', '),
-    };
+    if (scoringLock.current) return;
+
+    const validated = validateConfirmScoreRequest(draft);
+    if (!validated.ok) {
+      setFieldErrors(validated.fieldErrors);
+      setUiState('PARTIAL_RESULT');
+      setStatusMessage(validated.message);
+      focusFirstInvalid(validated.fieldErrors);
+      return;
+    }
+
+    scoringLock.current = true;
+    setUiState('SCORING');
+    setStatusMessage('Checking eligibility and match…');
+    setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submitData),
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        const jobRes = await fetch(`/api/jobs/${json.jobId}`);
-        if (jobRes.ok) {
-          const jobData = await jobRes.json();
-          setResult(jobData);
-          setStep('result');
-        }
+      const res = await postConfirmScore(validated.data);
+      if (!res.ok) {
+        setUiState('ERROR');
+        setErrorMessage(res.error.message);
+        if (res.error.fieldErrors) setFieldErrors(res.error.fieldErrors);
+        setStatusMessage(null);
+        return;
       }
-    } catch (error) {
-      console.error('Failed to add job', error);
-      setError('Failed to save and score job.');
+
+      setImportResult(res.data);
+      setUiState(deriveResultState(res.data.status));
+      setStatusMessage(null);
+      setErrorMessage(null);
     } finally {
-      setLoading(false);
+      scoringLock.current = false;
     }
   };
 
-  const getConfidenceBadge = (field: string) => {
-    if (!extractedData || !extractedData.confidence) return null;
-    const conf = extractedData.confidence[field];
-    
-    if (conf === 'high') return <span title="High confidence (from JSON-LD)" className="ml-2 w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>;
-    if (conf === 'medium') return <span title="Medium confidence (from meta tags)" className="ml-2 w-3 h-3 rounded-full bg-amber-500 inline-block"></span>;
-    if (conf === 'low' || conf === 'inferred') return <span title="Low confidence / Inferred" className="ml-2 w-3 h-3 rounded-full bg-red-500 inline-block"></span>;
-    return <span title="Not found" className="ml-2 w-3 h-3 rounded-full bg-slate-500 inline-block"></span>;
+  const resetToIdle = () => {
+    scoringLock.current = false;
+    setUiState('IDLE');
+    setUrl('');
+    setDraft(EMPTY_DRAFT);
+    setExtracted(null);
+    setFieldErrors({});
+    setStatusMessage(null);
+    setErrorMessage(null);
+    setImportResult(null);
+    setWarnings([]);
   };
 
+  const backToReview = () => {
+    scoringLock.current = false;
+    setImportResult(null);
+    setErrorMessage(null);
+    setUiState(deriveReviewState(getMissingConfirmFields(draft)));
+    setStatusMessage('Edit the extracted details, then confirm and score.');
+  };
+
+  const showReview =
+    uiState === 'PARTIAL_RESULT' ||
+    uiState === 'READY_TO_SCORE' ||
+    uiState === 'SCORING' ||
+    (uiState === 'ERROR' && extracted !== null);
+
+  const showResult =
+    uiState === 'SCORED' ||
+    uiState === 'HARD_REJECTED' ||
+    uiState === 'INELIGIBLE' ||
+    uiState === 'DUPLICATE';
+
+  const scoringInFlight = uiState === 'SCORING';
+  const confirmDisabled =
+    scoringInFlight ||
+    missingRequired.length > 0 ||
+    (uiState !== 'READY_TO_SCORE' &&
+      uiState !== 'PARTIAL_RESULT' &&
+      uiState !== 'ERROR');
+
+  const missingSet = new Set<string>(missingRequired);
+  const fieldInvalid = (key: string) =>
+    Boolean(fieldErrors[key]) ||
+    missingSet.has(key) ||
+    (key === 'country' && missingSet.has('location' satisfies ConfirmRequiredField));
+
   return (
-    <div className="space-y-8 animate-fade-in max-w-4xl mx-auto">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-          Import Job from URL
-        </h1>
-        <p className="text-gray-400 mt-2">Automatically extract job details from a public posting URL.</p>
+    <div className="import-page">
+      <header className="import-header">
+        <h1>Import job from URL</h1>
+        <p>
+          Scan a public job posting, review the extracted details, then confirm
+          to run eligibility checks and scoring.
+        </p>
       </header>
 
-      {step === 'input' && (
-        <div className="glass-card p-8 text-center animate-slide-up">
-          <form onSubmit={handleExtract} className="max-w-2xl mx-auto space-y-6">
-            <div>
-              <div className="relative">
-                <input 
-                  type="url" 
+      <div aria-live="polite" className="sr-status">
+        {statusMessage}
+      </div>
+
+      {(uiState === 'IDLE' || uiState === 'SCANNING' || (uiState === 'ERROR' && !extracted)) && (
+        <section className="panel">
+          <form onSubmit={handleScan} className="scan-form" noValidate>
+            <div className="field">
+              <label htmlFor={`${formId}-scan-url`}>Job URL</label>
+              <div className="url-row">
+                <input
+                  id={`${formId}-scan-url`}
+                  type="url"
+                  inputMode="url"
+                  autoComplete="url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://company.com/careers/job-123"
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-4 pr-24 py-4 text-white focus:outline-none focus:border-blue-500 transition-colors text-lg"
-                  required
+                  placeholder="https://company.com/careers/role"
+                  disabled={uiState === 'SCANNING'}
+                  aria-invalid={Boolean(errorMessage) && !isValidHttpUrl(url)}
+                  aria-describedby={errorMessage ? `${formId}-scan-error` : undefined}
                 />
-                <button 
+                <button
                   type="button"
-                  onClick={handlePaste}
-                  className="absolute right-2 top-2 bottom-2 bg-slate-700 hover:bg-slate-600 px-4 rounded text-sm font-medium transition-colors"
+                  className="btn btn-outline"
+                  disabled={uiState === 'SCANNING'}
+                  onClick={async () => {
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      setUrl(text);
+                    } catch {
+                      setErrorMessage('Could not read the clipboard.');
+                    }
+                  }}
                 >
                   Paste
                 </button>
               </div>
             </div>
-            
-            {error && (
-              <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-left">
-                <p className="font-medium flex items-center">
-                  <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  Extraction Failed
-                </p>
-                <p className="mt-1 text-sm">{error}</p>
+
+            {errorMessage && (
+              <div id={`${formId}-scan-error`} className="banner banner-error" role="alert">
+                <strong>Unable to scan</strong>
+                <p>{errorMessage}</p>
               </div>
             )}
 
-            <button 
-              type="submit" 
-              disabled={loading || !url}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center text-lg"
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={uiState === 'SCANNING' || !isValidHttpUrl(url)}
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Extracting...
-                </>
-              ) : 'Extract Job Data'}
+              {uiState === 'SCANNING' ? 'Reading the job posting…' : 'Scan posting'}
             </button>
-            
-            <div className="pt-4 border-t border-slate-700/50">
-              <Link href="/add-job" className="text-gray-400 hover:text-white transition-colors">
-                Or paste job description manually →
-              </Link>
-            </div>
+
+            <p className="hint">
+              <Link href="/add-job">Or enter job details manually</Link>
+            </p>
           </form>
-        </div>
+        </section>
       )}
 
-      {step === 'preview' && extractedData && (
-        <div className="glass-card p-6 animate-slide-up">
-          <div className="flex justify-between items-center mb-6">
+      {showReview && (
+        <section className="panel">
+          <div className="panel-head">
             <div>
-              <h2 className="text-xl font-bold text-white">Review Extracted Data</h2>
-              <p className="text-sm text-gray-400 mt-1">
-                Source: <a href={extractedData.source_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">{extractedData.source_url}</a>
+              <h2>Review extracted details</h2>
+              <p className="meta">
+                Source:{' '}
+                <a href={draft.url} target="_blank" rel="noreferrer">
+                  {displayOrFallback(draft.url, 'Not provided')}
+                </a>
+                {extracted?.extraction_method && (
+                  <> · Method: {extracted.extraction_method}</>
+                )}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Method: <span className="uppercase tracking-wider">{extractedData.extraction_method}</span>
-              </p>
-            </div>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-emerald-500 mr-1"></span> High Confidence</span>
-              <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-amber-500 mr-1"></span> Medium</span>
-              <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-red-500 mr-1"></span> Low/Inferred</span>
-              <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-slate-500 mr-1"></span> Not found</span>
             </div>
           </div>
-          
-          <form onSubmit={handleConfirm} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Job Title * {getConfidenceBadge('title')}
-                </label>
-                <input 
-                  value={formData.title || ''} 
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
-                  required 
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500" 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Company * {getConfidenceBadge('company')}
-                </label>
-                <input 
-                  value={formData.company || ''} 
-                  onChange={(e) => setFormData({...formData, company: e.target.value})}
-                  required 
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500" 
-                />
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">
-                Description * {getConfidenceBadge('description')}
-              </label>
-              <textarea 
-                value={formData.description || ''} 
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                required 
-                rows={8} 
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500"
+          {statusMessage && (
+            <div className="banner banner-info" role="status">
+              {statusMessage}
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <ul className="warnings">
+              {warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          )}
+
+          {errorMessage && (
+            <div className="banner banner-error" role="alert">
+              <strong>Scoring failed</strong>
+              <p>{errorMessage}</p>
+              <button type="button" className="btn btn-outline" onClick={backToReview}>
+                Edit extracted details
+              </button>
+            </div>
+          )}
+
+          <form onSubmit={handleConfirm} className="review-form" noValidate>
+            <fieldset disabled={uiState === 'SCORING'}>
+              <legend>Basic information</legend>
+              <div className="grid-2">
+                <ImportField
+                  id={`${formId}-title`}
+                  label="Job title"
+                  required
+                  invalid={fieldInvalid('title')}
+                  error={fieldErrors.title}
+                  value={draft.title}
+                  onChange={(v) => updateField('title', v)}
+                  inputRef={firstErrorRef}
+                />
+                <ImportField
+                  id={`${formId}-company`}
+                  label="Company name"
+                  required
+                  invalid={fieldInvalid('company')}
+                  error={fieldErrors.company}
+                  value={draft.company}
+                  onChange={(v) => updateField('company', v)}
+                />
+              </div>
+              <ImportField
+                id={`${formId}-url`}
+                label="Source URL"
+                required
+                type="url"
+                invalid={fieldInvalid('url')}
+                error={fieldErrors.url}
+                value={draft.url}
+                onChange={(v) => updateField('url', v)}
               />
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Country {getConfidenceBadge('country')}
-                </label>
-                <input 
-                  value={formData.country || ''} 
-                  onChange={(e) => setFormData({...formData, country: e.target.value})}
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white" 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  City {getConfidenceBadge('city')}
-                </label>
-                <input 
-                  value={formData.city || ''} 
-                  onChange={(e) => setFormData({...formData, city: e.target.value})}
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white" 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Work Setup {getConfidenceBadge('work_setup')}
-                </label>
-                <select 
-                  value={formData.work_setup || 'UNCLEAR'} 
-                  onChange={(e) => setFormData({...formData, work_setup: e.target.value})}
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white"
-                >
-                  <option value="UNCLEAR">Unclear</option>
-                  <option value="REMOTE">Remote</option>
-                  <option value="HYBRID">Hybrid</option>
-                  <option value="ONSITE">Onsite</option>
-                </select>
-              </div>
-            </div>
+            </fieldset>
 
-            <div className="flex gap-4 pt-4 border-t border-slate-700/50">
-              <button 
-                type="button" 
-                onClick={() => {
-                  setStep('input');
-                  setExtractedData(null);
-                  setFormData({});
-                }}
-                disabled={loading}
-                className="px-6 py-2 rounded-lg border border-slate-600 text-gray-300 hover:bg-slate-800 transition-colors"
-              >
-                Reset
+            <fieldset disabled={uiState === 'SCORING'}>
+              <legend>Location and work setup</legend>
+              <div className="grid-3">
+                <ImportField
+                  id={`${formId}-country`}
+                  label="Country"
+                  required={missingSet.has('location')}
+                  invalid={fieldInvalid('country')}
+                  error={fieldErrors.country}
+                  value={draft.country}
+                  onChange={(v) => updateField('country', v)}
+                  hint="Provide country or city"
+                />
+                <ImportField
+                  id={`${formId}-city`}
+                  label="City"
+                  value={draft.city}
+                  onChange={(v) => updateField('city', v)}
+                />
+                <div className="field">
+                  <label htmlFor={`${formId}-work_setup`}>
+                    Work setup <span className="req" aria-hidden="true">*</span>
+                  </label>
+                  <select
+                    id={`${formId}-work_setup`}
+                    value={draft.work_setup}
+                    onChange={(e) =>
+                      updateField('work_setup', e.target.value as FormDraft['work_setup'])
+                    }
+                    aria-invalid={fieldInvalid('work_setup')}
+                    aria-describedby={
+                      fieldErrors.work_setup ? `${formId}-work_setup-err` : undefined
+                    }
+                    className={fieldInvalid('work_setup') ? 'invalid' : undefined}
+                  >
+                    <option value="UNCLEAR">Unclear</option>
+                    <option value="REMOTE">Remote</option>
+                    <option value="HYBRID">Hybrid</option>
+                    <option value="ONSITE">On-site</option>
+                    <option value="TEMPORARY_REMOTE">Temporary remote</option>
+                  </select>
+                  {fieldErrors.work_setup && (
+                    <p id={`${formId}-work_setup-err`} className="field-error" role="alert">
+                      {fieldErrors.work_setup}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="grid-2">
+                <ImportField
+                  id={`${formId}-employment_type`}
+                  label="Employment type"
+                  value={draft.employment_type}
+                  onChange={(v) => updateField('employment_type', v)}
+                  hint="Optional"
+                />
+                <ImportField
+                  id={`${formId}-seniority`}
+                  label="Seniority"
+                  value={draft.seniority}
+                  onChange={(v) => updateField('seniority', v)}
+                  hint="Optional"
+                />
+              </div>
+            </fieldset>
+
+            <fieldset disabled={uiState === 'SCORING'}>
+              <legend>Description</legend>
+              <div className="field">
+                <label htmlFor={`${formId}-description`}>
+                  Job description <span className="req" aria-hidden="true">*</span>
+                </label>
+                <textarea
+                  id={`${formId}-description`}
+                  rows={8}
+                  value={draft.description}
+                  onChange={(e) => updateField('description', e.target.value)}
+                  aria-invalid={fieldInvalid('description')}
+                  aria-describedby={
+                    fieldErrors.description ? `${formId}-description-err` : undefined
+                  }
+                  className={fieldInvalid('description') ? 'invalid' : undefined}
+                  required
+                />
+                {fieldErrors.description && (
+                  <p id={`${formId}-description-err`} className="field-error" role="alert">
+                    {fieldErrors.description}
+                  </p>
+                )}
+              </div>
+            </fieldset>
+
+            <fieldset disabled={uiState === 'SCORING'}>
+              <legend>Requirements and compensation</legend>
+              <ImportField
+                id={`${formId}-skills`}
+                label="Skills"
+                value={draft.skills}
+                onChange={(v) => updateField('skills', v)}
+                hint="Optional — comma-separated"
+              />
+              <ImportField
+                id={`${formId}-salary_text`}
+                label="Salary"
+                value={draft.salary_text}
+                onChange={(v) => updateField('salary_text', v)}
+                hint="Optional — not invented if missing"
+              />
+            </fieldset>
+
+            {missingRequired.length > 0 && (
+              <div className="banner banner-warn" role="status">
+                Complete the required fields before scoring: {missingRequired.join(', ')}.
+              </div>
+            )}
+
+            <div className="form-actions">
+              <button type="button" className="btn btn-outline" onClick={resetToIdle}>
+                Cancel
               </button>
-              <button 
-                type="submit" 
-                disabled={loading}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors flex items-center justify-center"
-              >
-                {loading ? 'Processing...' : 'Confirm & Score'}
+              <button type="submit" className="btn btn-primary" disabled={confirmDisabled}>
+                {uiState === 'SCORING' ? 'Checking eligibility and match…' : 'Confirm and score'}
               </button>
             </div>
           </form>
-        </div>
+        </section>
       )}
 
-      {step === 'result' && result && (
-        <div className="glass-card p-8 animate-slide-up space-y-8">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-white mb-2">Analysis Complete</h2>
-            <p className="text-gray-400">Job successfully imported and scored</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
-              <h3 className="text-xl font-bold text-white mb-1">{result.job.title}</h3>
-              <p className="text-gray-400 mb-6">{result.job.company}</p>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50">
-                  <span className="block text-sm text-gray-500 mb-1">Category</span>
-                  <span className="font-medium text-white">{result.job.category}</span>
-                </div>
-                <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50">
-                  <span className="block text-sm text-gray-500 mb-1">Work Setup</span>
-                  <span className="font-medium text-white">{result.job.work_setup}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-6 bg-slate-800/50 rounded-xl border border-slate-700/50">
-                <div>
-                  <p className="text-sm text-gray-400 mb-1">AI Match Score</p>
-                  <div className="text-4xl font-bold text-blue-400">{result.score.score}/100</div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-400 mb-2">Recommendation</p>
-                  <div className={`px-4 py-2 rounded-full text-sm font-bold border inline-block ${
-                    result.score.recommendation === 'APPLY' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
-                    result.score.recommendation === 'REVIEW' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
-                    'bg-red-500/10 text-red-400 border-red-500/20'
-                  }`}>
-                    {result.score.recommendation}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-center gap-4 pt-6 border-t border-slate-700/50">
-            <button 
-              onClick={() => {
-                setUrl('');
-                setExtractedData(null);
-                setFormData({});
-                setResult(null);
-                setStep('input');
-              }}
-              className="px-6 py-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium transition-colors"
-            >
-              Import Another
-            </button>
-            <Link 
-              href="/"
-              className="px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
-            >
-              Back to Dashboard
-            </Link>
-          </div>
-        </div>
+      {showResult && importResult && (
+        <ImportResultPanel result={importResult} onAgain={resetToIdle} onEdit={backToReview} />
       )}
+
+      <style>{IMPORT_STYLES}</style>
     </div>
   );
 }

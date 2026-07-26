@@ -1,41 +1,15 @@
 import * as cheerio from 'cheerio';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import { computeMissingExtractionFields } from '../import-contracts.js';
+import type { ExtractedJobData, ExtractionResult } from '../types.js';
+
+export type { ExtractedJobData, ExtractionResult };
 
 // --- SSRF hardening configuration ---
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB cap on fetched HTML
 export const MAX_REDIRECTS = 5;
 export const FETCH_TIMEOUT_MS = 10000;
-
-export interface ExtractedJobData {
-  title: string | null;
-  company: string | null;
-  description: string | null;
-  country: string | null;
-  city: string | null;
-  work_setup: string | null;
-  employment_type: string | null;
-  salary_text: string | null;
-  required_skills: string[];
-  preferred_skills: string[];
-  seniority: string | null;
-  allowed_countries: string[];
-  allowed_regions: string[];
-  eligibility_text: string | null;
-  application_url: string | null;
-  source_url: string;
-  extraction_method: 'json-ld' | 'meta-tags' | 'html-heuristic' | 'manual';
-  confidence: Record<string, 'high' | 'medium' | 'low' | 'inferred'>;
-  raw_html?: string;
-}
-
-export interface ExtractionResult {
-  success: boolean;
-  data: ExtractedJobData | null;
-  error?: string;
-  warnings: string[];
-  requires_manual_input: boolean;
-}
 
 /** Return true if an IPv4 literal falls in a private, loopback, link-local, or otherwise reserved range. */
 function isBlockedIpv4(ip: string): boolean {
@@ -216,25 +190,44 @@ export async function resolveHostToPublicIps(
   return { ok: true };
 }
 
+/** Minimal JSON-LD JobPosting shape used by the extractor (unknown fields ignored). */
+interface JsonLdJobPosting {
+  '@type'?: string;
+  title?: string;
+  name?: string;
+  description?: string;
+  employmentType?: string | string[];
+  baseSalary?: unknown;
+  hiringOrganization?: { name?: string; legalName?: string };
+  jobLocation?:
+    | { address?: { addressLocality?: string; addressCountry?: string } }
+    | Array<{ address?: { addressLocality?: string; addressCountry?: string } }>;
+}
+
 export function extractFromJsonLd(html: string): Partial<ExtractedJobData> | null {
   const $ = cheerio.load(html);
   const scripts = $('script[type="application/ld+json"]');
-  let data: any = null;
+  let data: JsonLdJobPosting | null = null;
 
   for (const script of scripts) {
     try {
-      const parsed = JSON.parse($(script).html() || '{}');
+      const parsed: unknown = JSON.parse($(script).html() || '{}');
       // Sometimes it's an array of objects
-      const items = Array.isArray(parsed) ? parsed : (parsed['@graph'] || [parsed]);
-      
+      const asRecord = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+      const items: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(asRecord?.['@graph'])
+          ? (asRecord['@graph'] as unknown[])
+          : [parsed];
+
       for (const item of items) {
-        if (item['@type'] === 'JobPosting') {
-          data = item;
+        if (item && typeof item === 'object' && (item as JsonLdJobPosting)['@type'] === 'JobPosting') {
+          data = item as JsonLdJobPosting;
           break;
         }
       }
       if (data) break;
-    } catch (e) {
+    } catch {
       // Ignore parse errors
     }
   }
@@ -247,19 +240,24 @@ export function extractFromJsonLd(html: string): Partial<ExtractedJobData> | nul
     result.company = data.hiringOrganization.name || data.hiringOrganization.legalName;
   }
   if (data.description) result.description = data.description;
-  if (data.employmentType) result.employment_type = Array.isArray(data.employmentType) ? data.employmentType[0] : data.employmentType;
-  
-  if (data.baseSalary) {
-    result.salary_text = typeof data.baseSalary === 'string' ? data.baseSalary : JSON.stringify(data.baseSalary);
+  if (data.employmentType) {
+    result.employment_type = Array.isArray(data.employmentType)
+      ? data.employmentType[0]
+      : data.employmentType;
   }
-  
+
+  if (data.baseSalary) {
+    result.salary_text =
+      typeof data.baseSalary === 'string' ? data.baseSalary : JSON.stringify(data.baseSalary);
+  }
+
   if (data.jobLocation && Array.isArray(data.jobLocation) && data.jobLocation.length > 0) {
     const loc = data.jobLocation[0];
-    if (loc.address) {
+    if (loc?.address) {
       if (loc.address.addressLocality) result.city = loc.address.addressLocality;
       if (loc.address.addressCountry) result.country = loc.address.addressCountry;
     }
-  } else if (data.jobLocation && data.jobLocation.address) {
+  } else if (data.jobLocation && !Array.isArray(data.jobLocation) && data.jobLocation.address) {
     if (data.jobLocation.address.addressLocality) result.city = data.jobLocation.address.addressLocality;
     if (data.jobLocation.address.addressCountry) result.country = data.jobLocation.address.addressCountry;
   }
@@ -523,18 +521,28 @@ export async function extractFromUrl(url: string): Promise<ExtractionResult> {
       }
     }
 
+    const missingFields = computeMissingExtractionFields(resultData);
+    const warnings: string[] = [];
+    if (missingFields.length > 0) {
+      warnings.push(
+        `Missing required fields: ${missingFields.join(', ')}. Complete them before scoring.`,
+      );
+    }
+
+    // Partial extraction is still success — the user completes missing fields.
     return {
       success: true,
       data: resultData,
-      warnings: [],
-      requires_manual_input: false
+      warnings,
+      requires_manual_input: missingFields.length > 0,
+      missingFields,
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       success: false,
       data: null,
-      error: error.message || 'Failed to extract from URL',
+      error: error instanceof Error ? error.message : 'Failed to extract from URL',
       warnings: [],
       requires_manual_input: true
     };

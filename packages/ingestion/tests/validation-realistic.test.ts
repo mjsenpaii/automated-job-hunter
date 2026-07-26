@@ -214,6 +214,36 @@ describe('Realistic Job Validation Tests', () => {
     expect(result.rejection_reasons).toContain('SENIORITY_MISMATCH');
   });
 
+  it('Scenario 7b: Senior Frontend role requiring 5+ years (no explicit 8+/10+ marker)', async () => {
+    // Regression: the job details page previously showed a fabricated 88 overall /
+    // 85 experience score for this exact posting. A fresh graduate viewing a role
+    // that requires 5+ years must be HARD_REJECTED as SENIORITY_MISMATCH, and NO
+    // score may be produced or invented.
+    const raw: RawJobInput = {
+      source_name: 'validation-test',
+      title: 'Senior Frontend Engineer',
+      company: 'TechCorp Innovations',
+      description:
+        'We are looking for a Senior Frontend Engineer with deep expertise in React, Next.js, and modern CSS. Requirement: 5+ years of React and TypeScript experience to lead our product development.',
+      country: 'Philippines',
+      work_setup_hint: 'remote',
+      employment_type: 'Full-time',
+      seniority_hint: 'senior',
+      required_skills: ['react', 'typescript', 'next.js'],
+      salary_text: '$120,000 - $150,000 USD',
+      application_url: 'https://techcorp.example.com/careers/senior-frontend',
+    };
+
+    const result = await ingestJob(raw, existingJobs, VERIFIED_SKILLS);
+
+    expect(result.status).toBe('HARD_REJECTED');
+    expect(result.rejection_reasons).toContain('SENIORITY_MISMATCH');
+    // No fabricated scoring for a hard-rejected job.
+    expect(result.score).toBeUndefined();
+    expect(result.score_detail).toBeUndefined();
+    expect(result.normalized_job.years_experience_min).toBe(5);
+  });
+
   it('Scenario 8: Scam/MLM Listing', async () => {
     const raw: RawJobInput = {
       source_name: 'validation-test',
