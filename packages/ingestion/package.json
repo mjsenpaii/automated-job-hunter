@@ -32,6 +32,7 @@
     "test": "vitest run",
     "backfill:government": "node dist/backfill-government-metadata.js",
     "discovery:arbeitnow": "node dist/discovery/arbeitnow-cli.js",
+    "discovery:remotive": "node dist/discovery/remotive-cli.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

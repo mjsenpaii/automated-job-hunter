@@ -3,8 +3,8 @@
 ## Phase 7.1A scope
 
 Phase 7.1A proves public, structured job discovery before Trigger.dev scheduling
-is introduced. It implements a reusable discovery core and one source adapter:
-Arbeitnow.
+is introduced. It implements a reusable discovery core with two source
+adapters: Arbeitnow and Remotive.
 
 The flow is:
 
@@ -41,7 +41,32 @@ resume, cover-letter, email, message, or submission records.
 
 The source response is structured, so Gemini is not used.
 
-## CLI
+## Remotive source
+
+- Official API documentation:
+  https://github.com/remotive-io/remote-jobs-api
+- Official source and terms page:
+  https://remotive.com/remote-jobs/api
+- Fixed API endpoint:
+  https://remotive.com/api/remote-jobs
+- Authentication: none; the public API requires no key.
+- Attribution: source name and the canonical Remotive job URL are retained.
+- Runtime limit: at most 50 accepted source jobs in one request.
+- Requests: descriptive User-Agent and a bounded ten-second timeout.
+- Rate guidance: Remotive advises no more than four fetches per day and blocks
+  excessive traffic above two requests per minute. Phase 7.1A.2 performs only
+  an explicit manual request.
+- Content: HTML descriptions are cleaned with the existing content cleaner.
+  Structured tags and scalar fields are preserved without webpage-noise
+  filtering.
+- Exclusions: no employer/application-link crawling, redistribution to
+  third-party job boards, authentication, CAPTCHA bypass, browser automation,
+  or rate-limit bypass.
+
+Remotive's public feed is delayed by 24 hours. The source response is
+structured, so Gemini is not used.
+
+## Arbeitnow CLI
 
 Dry run is the default:
 
@@ -67,6 +92,37 @@ Supported options:
 - `--query <text>`
 - `--apply`
 - `--help`
+
+## Remotive CLI
+
+Dry run is also the default:
+
+```powershell
+pnpm discovery:remotive -- --limit 20
+pnpm discovery:remotive -- --limit 50 --query "developer"
+pnpm discovery:remotive -- --category "software-dev"
+```
+
+Persistence must be requested explicitly:
+
+```powershell
+pnpm discovery:remotive -- --apply
+```
+
+Apply mode was not run during Phase 7.1A.2 implementation.
+
+Supported options:
+
+- `--limit <1-50>`
+- `--query <text>`
+- `--category <text>`
+- `--apply`
+- `--help`
+
+Remotive is remote-only, so it does not expose a redundant `--remote-only`
+option. Query matching runs locally across title, company, category, tags,
+candidate location, and cleaned description. Category accepts a
+case-insensitive category name or slug.
 
 Dry runs open the existing SQLite database read-only for deduplication. They do
 not initialize schema or write database/WAL state. The summary omits full job

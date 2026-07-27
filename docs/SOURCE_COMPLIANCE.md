@@ -36,3 +36,31 @@ For every job board or data source, document the following before enabling:
   submission.
 - **Compliance Status**: Approved for manual dry-run-first discovery in Phase
   7.1A. Trigger.dev scheduling remains disabled pending Phase 7.1B review.
+
+---
+
+## Remotive public remote-jobs API
+
+- **Name**: Remotive
+- **Access Method**: Official public JSON API
+- **Endpoint**: `https://remotive.com/api/remote-jobs`
+- **Official documentation**: https://github.com/remotive-io/remote-jobs-api
+- **Official source/terms page**: https://remotive.com/remote-jobs/api
+- **Authentication**: No API key
+- **ToS Summary**: Public access is provided so developers can share Remotive
+  jobs with clear attribution and links back to the canonical Remotive URL.
+  Jobs are delayed by 24 hours. The terms prohibit republishing the feed to
+  third-party job boards and using listings to collect signups or email
+  addresses.
+- **Rate Limits**: Remotive advises at most four requests per day and states
+  that excessive traffic above two requests per minute will be blocked. The
+  repository permits one explicit manual request per CLI run and caps it at 50
+  accepted jobs.
+- **Permitted Automation**: Local, read-only retrieval and deterministic review
+  of public structured listings while retaining Remotive attribution.
+- **Restrictions**: Fixed Remotive API host only; no redistribution to other
+  job boards, employer/application-link crawling, authentication, CAPTCHA
+  handling, rate-limit bypass, application creation, or submission.
+- **Compliance Status**: Approved for manual dry-run-first local discovery in
+  Phase 7.1A.2. Trigger.dev scheduling remains disabled pending Phase 7.1B
+  review.

@@ -10,6 +10,7 @@ export const DiscoveryOptionsSchema = z.object({
   pages: z.number().int().min(1).max(3),
   remoteOnly: z.boolean(),
   query: z.string(),
+  category: z.string().default(''),
   apply: z.boolean(),
 });
 export type DiscoveryOptions = z.infer<typeof DiscoveryOptionsSchema>;
@@ -22,6 +23,8 @@ export const DiscoveredJobSchema = z.object({
   location: z.string().trim().min(1).nullable(),
   remote: z.boolean().nullable(),
   employmentType: z.string().trim().min(1).nullable(),
+  category: z.string().trim().min(1).nullable().optional(),
+  salaryText: z.string().trim().min(1).nullable().optional(),
   description: z.string().trim().min(1),
   tags: z.array(z.string().trim().min(1)),
   publishedAt: z.string().datetime().nullable(),

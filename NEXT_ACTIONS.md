@@ -1,21 +1,22 @@
 # Next Actions
 
 **Last updated:** 2026-07-28 PHT
-**Current state:** Phase 7.1A Arbeitnow public-job discovery is implemented locally on top of the pushed Gemini importer/government-enrichment baseline. The CLI is dry-run by default, uses the existing deterministic pipeline, and persists successful discoveries as `DISCOVERED` only with explicit `--apply`. The required live dry run fetched ten records and persisted none; SQLite was byte-for-byte unchanged. Final verification passes with 253/253 tests across 28 files, workspace build 6/6, dashboard production build, and strict TypeScript. The Phase 7.1A changes are uncommitted and unpushed.
+**Current state:** Phase 7.1A.2 adds a Remotive adapter locally on top of the committed and pushed Arbeitnow discovery core. Both CLIs are dry-run by default, use the existing deterministic pipeline, and persist successful discoveries as `DISCOVERED` only with explicit `--apply`. The required Remotive live dry run fetched 36 records, matched five, and persisted none; SQLite content was byte-for-byte unchanged. Final verification passes with 273/273 tests across 30 files, workspace build 6/6, dashboard production build, and strict TypeScript. The Phase 7.1A.2 changes are uncommitted and unpushed.
 
 ---
 
 ## Review this implementation
 
-1. Review the Phase 7.1A architecture and source-compliance notes in
+1. Review the Phase 7.1A/7.1A.2 architecture and source-compliance notes in
    `docs/PUBLIC_JOB_DISCOVERY.md` and `docs/SOURCE_COMPLIANCE.md`.
-2. Run a safe manual dry run:
+2. Run either safe manual dry run:
 
    ```powershell
    pnpm discovery:arbeitnow -- --limit 10 --pages 1 --remote-only
+   pnpm discovery:remotive -- --limit 50 --query "developer"
    ```
 
-3. Do not use `--apply` until the source mapping and real dry-run preview are approved.
+3. Do not use either source's `--apply` until its mapping and real dry-run preview are approved.
 4. Keep Trigger.dev scheduling deferred to Phase 7.1B; its future task must call the reusable
    discovery runner rather than duplicate source or pipeline logic.
 5. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
@@ -51,11 +52,16 @@
 - Existing saved rows are not automatically rewritten. The explicit
   `pnpm --filter @job-app/ingestion backfill:government` utility defaults to dry-run; use
   `-- --apply` only after reviewing its counts. Apply mode was not run in this session.
-- Arbeitnow currently provides one structured source. It does not establish whether a remote
-  European job accepts Philippine applicants, so the deterministic pipeline correctly leaves
+- Arbeitnow and Remotive provide two structured sources. A remote flag or candidate region does not
+  by itself establish Philippine eligibility, so the deterministic pipeline correctly leaves
   ambiguous eligibility as `REQUIRES_REVIEW`.
 - Arbeitnow source tags are preserved as source-provided job skills/categories; the adapter does
   not infer additional skills, salary, country eligibility, dates, or experience requirements.
+- Remotive's public feed is delayed by 24 hours. Its 50-job request ceiling is intentionally
+  conservative, query filtering occurs locally after retrieval, and provider rate guidance limits
+  how frequently manual runs should be performed.
+- Remotive source salary text is retained only when explicitly supplied. Missing currency, exact
+  range, experience, schedule, closing date, and Philippine eligibility are not invented.
 - Discovery is manual only. Trigger.dev scheduling, retries across task runs, and run monitoring
   remain Phase 7.1B work.
 
@@ -166,6 +172,6 @@ Resolution summary:
 
 - **Phase 6 — Browser Assistance** (Playwright) — NOT STARTED.
 - **Phase 7 — Limited Automation** (Trigger.dev) — NOT STARTED.
-- **Phase 7.1B — Trigger.dev scheduling** — DEFERRED until manual Arbeitnow discovery is approved.
+- **Phase 7.1B — Trigger.dev scheduling** — DEFERRED until manual Arbeitnow and Remotive discovery are approved.
 - Additional source adapters (Gmail alerts, RSS/Atom).
 - Answer remaining candidate questions (Q6–Q12: salary, location, schedule, equipment, English level).

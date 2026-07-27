@@ -1,9 +1,45 @@
 # Project Status
 
 **Last updated:** 2026-07-28 PHT
-**Current phase:** Phase 7.1A — reusable public-job discovery + Arbeitnow manual dry run (implemented locally, uncommitted)
-**Overall health:** 🟢 253/253 tests passing (28 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
-**Active branch:** `master` at pushed baseline `ee3bf0d` (Phase 7.1A local changes uncommitted)
+**Current phase:** Phase 7.1A.2 — Remotive public-job adapter + manual dry run (implemented locally, uncommitted)
+**Overall health:** 🟢 273/273 tests passing (30 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
+**Active branch:** `master` at pushed baseline `dcf7df0` (Phase 7.1A.2 local changes uncommitted)
+
+---
+
+## Session — Phase 7.1A.2 Remotive Public Job Discovery
+
+Added Remotive as the second structured source on the committed reusable discovery core. The
+Arbeitnow adapter remains unchanged. No Trigger.dev scheduling, Gemini extraction, browser
+automation, application package, message, or submission behavior was added.
+
+- Added a fixed-host Remotive adapter using the official public remote-jobs API with no key, a
+  descriptive User-Agent, ten-second timeout, envelope/per-record Zod validation, canonical
+  Remotive URL validation, and a 50-accepted-job ceiling.
+- Reused the common `DiscoveredJob` mapper, local filters, `ingestJob`, deduplication, shared atomic
+  persistence, `DISCOVERED` review status, and CLI summary. Source category and explicit salary
+  text were added as optional common metadata and are retained in the source snapshot.
+- Added `pnpm discovery:remotive` with `--limit`, `--query`, `--category`, `--apply`, and `--help`.
+  Dry-run remains the default. Query matching covers title, company, category, tags, candidate
+  location, and cleaned description; category accepts a case-insensitive name or slug.
+- HTML cleaning is limited to the description. Structured tags and scalar values receive only
+  whitespace normalization so legitimate values such as `Accessibility` are not mistaken for
+  copied-webpage navigation noise.
+- Added 20 mocked tests covering source mapping, optional fields, salary-text semantics, stable
+  identity, the job ceiling, safe source errors, query/category filters, dry-run immutability,
+  in-memory apply, deduplication, hard rejection/scoring reuse, no applications, no Gemini
+  dependency, and safe CLI output.
+- The required live command fetched and validated 36 current Remotive records. The local
+  `developer` query excluded 31; the existing pipeline produced four `HARD_REJECTED` jobs and one
+  scored `DISCOVERED` job, with zero duplicates and zero pipeline errors. Five jobs would have been
+  persisted and zero were persisted.
+- Database, WAL, and shared-memory content hashes and all table counts were identical before and
+  after the live dry run. The existing one job/one score row remained unchanged, and applications
+  remained empty.
+- Final verification passes: 273/273 tests, workspace build 6/6, standalone dashboard production
+  build, dashboard strict TypeScript, and `git diff --check`.
+- Remotive attribution and access restrictions are documented. Trigger.dev remains deferred to
+  Phase 7.1B.
 
 ---
 
@@ -154,7 +190,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A manual Arbeitnow discovery implemented; Trigger.dev scheduling deferred to 7.1B |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive manual discovery implemented; Trigger.dev scheduling deferred to 7.1B |
 
 ---
 
@@ -167,7 +203,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 25 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
 | `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
-| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, manual + **URL-import adapter (SSRF-hardened)** | 117 ✅ |
+| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, Remotive, manual + **URL-import adapter (SSRF-hardened)** | 137 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
 | `@job-app/dashboard` | Next.js productivity UI + hybrid Gemini importer + `ingestJob`-backed confirmation | 51 ✅ + build/runtime green |
 
@@ -187,6 +223,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `b003fb8` | wip: preserve AGY URL importer and validation work | 114 |
 | `ea3b565` | feat: complete job URL importer and automated scoring validation | 141 |
 | `ee3bf0d` | feat: add Gemini job importer and government salary enrichment | 232 |
+| `dcf7df0` | feat: add public job discovery with Arbeitnow | 253 |
 | _(pending)_ | fix: dashboard build & runtime (workspace packages, DB, API routes) | 141 |
 
 ---

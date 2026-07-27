@@ -9,10 +9,15 @@ import {
   ArbeitnowDiscoveryError,
 } from '../adapters/arbeitnow.js';
 import {
+  RemotiveAdapter,
+  RemotiveDiscoveryError,
+} from '../adapters/remotive.js';
+import {
   DiscoveryOptionsSchema,
   type DiscoveryOptions,
   type DiscoveryRepository,
   type DiscoveryRunSummary,
+  type DiscoverySourceAdapter,
 } from './contracts.js';
 import { createDiscoveryRepository } from './repository.js';
 import { runDiscovery } from './runner.js';
@@ -53,6 +58,17 @@ export interface ArbeitnowCliDependencies {
   logError?: (message: string) => void;
 }
 
+export interface RemotiveCliDependencies {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  repository?: DiscoveryRepository;
+  verifiedSkills?: SkillEntry[];
+  databasePath?: string;
+  skillsPath?: string;
+  log?: (message: string) => void;
+  logError?: (message: string) => void;
+}
+
 export const ARBEITNOW_CLI_HELP = `Usage:
   pnpm discovery:arbeitnow -- [options]
 
@@ -61,6 +77,18 @@ Options:
   --pages <1-3>    Maximum API pages to fetch (default: 1)
   --remote-only    Keep only records explicitly marked remote
   --query <text>   Case-insensitive local search
+  --apply          Persist results; omitted means dry-run
+  --help           Show this help
+
+The command never creates applications or submits job applications.`;
+
+export const REMOTIVE_CLI_HELP = `Usage:
+  pnpm discovery:remotive -- [options]
+
+Options:
+  --limit <1-50>   Maximum source jobs to process (default: 50)
+  --query <text>   Case-insensitive local search
+  --category <text> Filter by Remotive category name or slug
   --apply          Persist results; omitted means dry-run
   --help           Show this help
 
@@ -87,6 +115,7 @@ export function parseArbeitnowCliArgs(args: string[]): ParsedDiscoveryCli {
     pages: 1,
     remoteOnly: false,
     query: '',
+    category: '',
     apply: false,
   };
   let help = false;
@@ -120,6 +149,56 @@ export function parseArbeitnowCliArgs(args: string[]): ParsedDiscoveryCli {
     }
     if (argument === '--query') {
       candidate.query = requiredValue(args, index, '--query');
+      index += 1;
+      continue;
+    }
+    throw new DiscoveryCliError(`Unknown option: ${argument}`);
+  }
+
+  const parsed = DiscoveryOptionsSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new DiscoveryCliError(
+      parsed.error.issues[0]?.message ?? 'Invalid discovery options.',
+    );
+  }
+  return { help, options: parsed.data };
+}
+
+export function parseRemotiveCliArgs(args: string[]): ParsedDiscoveryCli {
+  const candidate: DiscoveryOptions = {
+    limit: 50,
+    pages: 1,
+    remoteOnly: false,
+    query: '',
+    category: '',
+    apply: false,
+  };
+  let help = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--') continue;
+    if (argument === '--help') {
+      help = true;
+      continue;
+    }
+    if (argument === '--apply') {
+      candidate.apply = true;
+      continue;
+    }
+    if (argument === '--limit') {
+      const value = requiredValue(args, index, '--limit');
+      candidate.limit = integerOption(value, '--limit');
+      index += 1;
+      continue;
+    }
+    if (argument === '--query') {
+      candidate.query = requiredValue(args, index, '--query');
+      index += 1;
+      continue;
+    }
+    if (argument === '--category') {
+      candidate.category = requiredValue(args, index, '--category');
       index += 1;
       continue;
     }
@@ -214,6 +293,36 @@ export function formatDiscoverySummary(
   return lines.join('\n');
 }
 
+type SharedCliDependencies = Omit<
+  ArbeitnowCliDependencies,
+  'fetchImpl' | 'timeoutMs' | 'logError'
+>;
+
+async function executeDiscoveryCli(
+  parsed: ParsedDiscoveryCli,
+  adapter: DiscoverySourceAdapter,
+  dependencies: SharedCliDependencies,
+): Promise<DiscoveryRunSummary> {
+  const databasePath =
+    dependencies.databasePath ??
+    path.join(REPOSITORY_ROOT, 'data', 'app.db');
+  const skillsPath =
+    dependencies.skillsPath ??
+    path.join(REPOSITORY_ROOT, 'candidate', 'skills.verified.json');
+  const repository =
+    dependencies.repository ??
+    repositoryForRun(parsed.options, databasePath);
+  const verifiedSkills =
+    dependencies.verifiedSkills ?? loadVerifiedSkills(skillsPath);
+  const summary = await runDiscovery(parsed.options, {
+    adapter,
+    repository,
+    verifiedSkills,
+  });
+  (dependencies.log ?? console.log)(formatDiscoverySummary(summary));
+  return summary;
+}
+
 export async function runArbeitnowCli(
   args: string[],
   dependencies: ArbeitnowCliDependencies = {},
@@ -228,26 +337,14 @@ export async function runArbeitnowCli(
       return { exitCode: 0, summary: null };
     }
 
-    const databasePath =
-      dependencies.databasePath ??
-      path.join(REPOSITORY_ROOT, 'data', 'app.db');
-    const skillsPath =
-      dependencies.skillsPath ??
-      path.join(REPOSITORY_ROOT, 'candidate', 'skills.verified.json');
-    const repository =
-      dependencies.repository ??
-      repositoryForRun(parsed.options, databasePath);
-    const verifiedSkills =
-      dependencies.verifiedSkills ?? loadVerifiedSkills(skillsPath);
-    const summary = await runDiscovery(parsed.options, {
-      adapter: new ArbeitnowAdapter({
+    const summary = await executeDiscoveryCli(
+      parsed,
+      new ArbeitnowAdapter({
         fetchImpl: dependencies.fetchImpl,
         timeoutMs: dependencies.timeoutMs,
       }),
-      repository,
-      verifiedSkills,
-    });
-    log(formatDiscoverySummary(summary));
+      dependencies,
+    );
     return { exitCode: 0, summary };
   } catch (error) {
     const message =
@@ -255,6 +352,41 @@ export async function runArbeitnowCli(
       error instanceof ArbeitnowDiscoveryError
         ? error.message
         : 'The Arbeitnow discovery run failed safely. No jobs were persisted.';
+    logError(`Error: ${message}`);
+    return { exitCode: 1, summary: null };
+  }
+}
+
+export async function runRemotiveCli(
+  args: string[],
+  dependencies: RemotiveCliDependencies = {},
+): Promise<{ exitCode: number; summary: DiscoveryRunSummary | null }> {
+  const log = dependencies.log ?? console.log;
+  const logError = dependencies.logError ?? console.error;
+
+  try {
+    const parsed = parseRemotiveCliArgs(args);
+    if (parsed.help) {
+      log(REMOTIVE_CLI_HELP);
+      return { exitCode: 0, summary: null };
+    }
+
+    const summary = await executeDiscoveryCli(
+      parsed,
+      new RemotiveAdapter({
+        fetchImpl: dependencies.fetchImpl,
+        timeoutMs: dependencies.timeoutMs,
+        category: parsed.options.category,
+      }),
+      dependencies,
+    );
+    return { exitCode: 0, summary };
+  } catch (error) {
+    const message =
+      error instanceof DiscoveryCliError ||
+      error instanceof RemotiveDiscoveryError
+        ? error.message
+        : 'The Remotive discovery run failed safely. No jobs were persisted.';
     logError(`Error: ${message}`);
     return { exitCode: 1, summary: null };
   }

@@ -19,6 +19,7 @@ export function mapDiscoveredJobToRawInput(
     work_setup_hint:
       discovered.remote === true ? 'remote' : undefined,
     employment_type: discovered.employmentType ?? undefined,
+    salary_text: discovered.salaryText ?? undefined,
     required_skills: discovered.tags,
     raw_html: JSON.stringify({
       version: 1,
@@ -30,6 +31,8 @@ export function mapDiscoveredJobToRawInput(
         location: discovered.location,
         remote: discovered.remote,
         employmentType: discovered.employmentType,
+        category: discovered.category ?? null,
+        salaryText: discovered.salaryText ?? null,
         tags: discovered.tags,
         publishedAt: discovered.publishedAt,
       },

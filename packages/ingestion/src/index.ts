@@ -11,6 +11,7 @@ export * from './government-salary-schedules.js';
 export * from './job-snapshot.js';
 export * from './persistence.js';
 export * from './adapters/arbeitnow.js';
+export * from './adapters/remotive.js';
 export * from './discovery/contracts.js';
 export * from './discovery/filters.js';
 export * from './discovery/mapper.js';

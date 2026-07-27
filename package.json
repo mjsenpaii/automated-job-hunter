@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "lint": "turbo run lint",
     "discovery:arbeitnow": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:arbeitnow",
+    "discovery:remotive": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:remotive",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {

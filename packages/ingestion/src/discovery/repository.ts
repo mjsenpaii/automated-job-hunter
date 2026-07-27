@@ -20,6 +20,8 @@ function snapshot(record: DiscoveryPersistenceRecord): string {
       location: record.discovered.location,
       remote: record.discovered.remote,
       employmentType: record.discovered.employmentType,
+      category: record.discovered.category ?? null,
+      salaryText: record.discovered.salaryText ?? null,
       tags: record.discovered.tags,
       publishedAt: record.discovered.publishedAt,
     },
