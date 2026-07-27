@@ -21,3 +21,5 @@ browser-profiles/
 screenshots/
 .DS_Store
 Thumbs.db
+
+.trigger

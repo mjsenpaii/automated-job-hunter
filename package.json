@@ -12,6 +12,10 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "@trigger.dev/build": "4.5.7",
+    "@trigger.dev/sdk": "4.5.7",
+    "import-in-the-middle": "3.0.1",
+    "trigger.dev": "4.5.7",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
