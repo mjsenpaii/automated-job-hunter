@@ -6,7 +6,7 @@ import type {
 } from '../types.js';
 
 export const DiscoveryOptionsSchema = z.object({
-  limit: z.number().int().min(1).max(50),
+  limit: z.number().int().min(1).max(100),
   pages: z.number().int().min(1).max(3),
   remoteOnly: z.boolean(),
   query: z.string(),
@@ -24,10 +24,17 @@ export const DiscoveredJobSchema = z.object({
   remote: z.boolean().nullable(),
   employmentType: z.string().trim().min(1).nullable(),
   category: z.string().trim().min(1).nullable().optional(),
+  team: z.string().trim().min(1).nullable().optional(),
+  department: z.string().trim().min(1).nullable().optional(),
+  workplaceType: z
+    .enum(['remote', 'hybrid', 'on-site', 'unspecified'])
+    .nullable()
+    .optional(),
   salaryText: z.string().trim().min(1).nullable().optional(),
   description: z.string().trim().min(1),
   tags: z.array(z.string().trim().min(1)),
   publishedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime().nullable().optional(),
   sourceUrl: z.string().url(),
   applicationUrl: z.string().url().nullable(),
 });

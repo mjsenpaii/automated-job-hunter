@@ -21,9 +21,13 @@ function snapshot(record: DiscoveryPersistenceRecord): string {
       remote: record.discovered.remote,
       employmentType: record.discovered.employmentType,
       category: record.discovered.category ?? null,
+      team: record.discovered.team ?? null,
+      department: record.discovered.department ?? null,
+      workplaceType: record.discovered.workplaceType ?? null,
       salaryText: record.discovered.salaryText ?? null,
       tags: record.discovered.tags,
       publishedAt: record.discovered.publishedAt,
+      updatedAt: record.discovered.updatedAt ?? null,
     },
     pipeline: {
       status: record.result.status,

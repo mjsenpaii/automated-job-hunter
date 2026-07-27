@@ -204,6 +204,19 @@ export class ArbeitnowAdapter implements DiscoverySourceAdapter {
       'limit' | 'pages'
     >,
   ): Promise<DiscoveryFetchResult> {
+    if (rawOptions.limit > 50) {
+      throw new z.ZodError([
+        {
+          code: 'too_big',
+          maximum: 50,
+          type: 'number',
+          inclusive: true,
+          exact: false,
+          message: 'Arbeitnow accepts at most 50 jobs per run.',
+          path: ['limit'],
+        },
+      ]);
+    }
     const options = DiscoveryOptionsSchema.pick({
       limit: true,
       pages: true,

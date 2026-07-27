@@ -64,3 +64,41 @@ For every job board or data source, document the following before enabling:
 - **Compliance Status**: Approved for manual dry-run-first local discovery in
   Phase 7.1A.2. Trigger.dev scheduling remains disabled pending Phase 7.1B
   review.
+
+---
+
+## Lever Postings API
+
+- **Name**: Lever public company boards
+- **Access Method**: Official public JSON Postings API
+- **Endpoint**: `https://api.lever.co/v0/postings/{site}`
+- **Official documentation**: https://github.com/lever/postings-api
+- **Official access guidance**: https://hire.lever.co/developer/support
+- **Authentication**: No authentication is required for read-only retrieval of
+  published postings. Lever application submission is a separate authenticated
+  operation and is not used.
+- **Response and pagination**: `GET /v0/postings/{site}` returns published
+  postings as a JSON array when JSON mode is requested. The documented `skip`
+  and `limit` query parameters provide offset pagination.
+- **Workplace field compatibility**: Official Lever documentation uses both
+  `on-site` (public Postings API) and `onsite` (Lever developer API) for the
+  onsite workplace type. The adapter accepts only the documented values and
+  normalizes `onsite` to canonical `on-site`; unknown enum values are rejected.
+- **Verified Phase 7.1A.3 boards (2026-07-28)**:
+  - Spotify (`spotify`)
+  - Highspot (`highspot`)
+  - Aleph (`aleph`)
+- **Rate Limits**: No numeric public read limit is stated in the official
+  documentation reviewed for Phase 7.1A.3. This repository uses explicit manual
+  runs, a ten-second request timeout, at most ten configured companies, and no
+  more than 100 accepted jobs per run.
+- **Permitted Automation**: Read-only retrieval of published jobs from
+  explicitly configured public company boards through Lever's documented API.
+- **Restrictions**: Fixed global Lever API host only; configured and
+  live-verified site identifiers only; no arbitrary host or URL input; no
+  internal/hidden jobs, application-form retrieval or submission,
+  employer-page crawling, browser automation, login, cookies, CAPTCHA handling,
+  rate-limit bypass, or auto-application.
+- **Compliance Status**: Approved for manual dry-run-first local discovery in
+  Phase 7.1A.3. Trigger.dev scheduling remains disabled pending Phase 7.1B
+  review.

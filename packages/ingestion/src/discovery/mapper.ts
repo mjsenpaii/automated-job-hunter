@@ -4,6 +4,14 @@ import type { DiscoveredJob } from './contracts.js';
 export function mapDiscoveredJobToRawInput(
   discovered: DiscoveredJob,
 ): RawJobInput {
+  const workSetupHint =
+    discovered.remote === true
+      ? 'remote'
+      : discovered.workplaceType === 'hybrid'
+        ? 'hybrid'
+        : discovered.workplaceType === 'on-site'
+          ? 'onsite'
+          : undefined;
   return {
     source_name: discovered.sourceName,
     source_job_id: discovered.sourceJobId,
@@ -16,8 +24,8 @@ export function mapDiscoveredJobToRawInput(
     // The public API exposes a location string, not separately verified
     // city/country fields. Preserve it without inventing a country.
     city: discovered.location ?? undefined,
-    work_setup_hint:
-      discovered.remote === true ? 'remote' : undefined,
+    work_setup_hint: workSetupHint,
+    work_setup_confidence: workSetupHint ? 1 : undefined,
     employment_type: discovered.employmentType ?? undefined,
     salary_text: discovered.salaryText ?? undefined,
     required_skills: discovered.tags,
@@ -32,9 +40,13 @@ export function mapDiscoveredJobToRawInput(
         remote: discovered.remote,
         employmentType: discovered.employmentType,
         category: discovered.category ?? null,
+        team: discovered.team ?? null,
+        department: discovered.department ?? null,
+        workplaceType: discovered.workplaceType ?? null,
         salaryText: discovered.salaryText ?? null,
         tags: discovered.tags,
         publishedAt: discovered.publishedAt,
+        updatedAt: discovered.updatedAt ?? null,
       },
     }),
   };

@@ -13,6 +13,10 @@ import {
   RemotiveDiscoveryError,
 } from '../adapters/remotive.js';
 import {
+  LeverAdapter,
+  LeverDiscoveryError,
+} from '../adapters/lever.js';
+import {
   DiscoveryOptionsSchema,
   type DiscoveryOptions,
   type DiscoveryRepository,
@@ -21,6 +25,10 @@ import {
 } from './contracts.js';
 import { createDiscoveryRepository } from './repository.js';
 import { runDiscovery } from './runner.js';
+import {
+  LEVER_COMPANIES,
+  type LeverCompany,
+} from './lever-companies.v1.js';
 
 const REPOSITORY_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -69,6 +77,23 @@ export interface RemotiveCliDependencies {
   logError?: (message: string) => void;
 }
 
+export interface LeverCliDependencies {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  companies?: LeverCompany[];
+  repository?: DiscoveryRepository;
+  verifiedSkills?: SkillEntry[];
+  databasePath?: string;
+  skillsPath?: string;
+  log?: (message: string) => void;
+  logError?: (message: string) => void;
+}
+
+export interface ParsedLeverCli extends ParsedDiscoveryCli {
+  listCompanies: boolean;
+  companies: LeverCompany[];
+}
+
 export const ARBEITNOW_CLI_HELP = `Usage:
   pnpm discovery:arbeitnow -- [options]
 
@@ -93,6 +118,24 @@ Options:
   --help           Show this help
 
 The command never creates applications or submits job applications.`;
+
+export const LEVER_CLI_HELP = `Usage:
+  pnpm discovery:lever -- --company <configured-id-or-name> [options]
+  pnpm discovery:lever -- --all-companies [options]
+  pnpm discovery:lever -- --list-companies
+
+Options:
+  --company <value>   Select a configured company; may be repeated
+  --all-companies     Select every enabled configured company
+  --list-companies    List configured companies without fetching jobs
+  --limit <1-100>     Maximum accepted jobs across companies (default: 100)
+  --remote-only       Keep only explicitly remote Lever records
+  --query <text>      Case-insensitive local search
+  --apply             Persist results; omitted means dry-run
+  --help              Show this help
+
+Arbitrary hosts and URLs are not accepted. The command never creates
+applications or submits job applications.`;
 
 function requiredValue(args: string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -156,9 +199,11 @@ export function parseArbeitnowCliArgs(args: string[]): ParsedDiscoveryCli {
   }
 
   const parsed = DiscoveryOptionsSchema.safeParse(candidate);
-  if (!parsed.success) {
+  if (!parsed.success || candidate.limit > 50) {
     throw new DiscoveryCliError(
-      parsed.error.issues[0]?.message ?? 'Invalid discovery options.',
+      !parsed.success
+        ? parsed.error.issues[0]?.message ?? 'Invalid discovery options.'
+        : '--limit must be between 1 and 50.',
     );
   }
   return { help, options: parsed.data };
@@ -206,12 +251,148 @@ export function parseRemotiveCliArgs(args: string[]): ParsedDiscoveryCli {
   }
 
   const parsed = DiscoveryOptionsSchema.safeParse(candidate);
+  if (!parsed.success || candidate.limit > 50) {
+    throw new DiscoveryCliError(
+      !parsed.success
+        ? parsed.error.issues[0]?.message ?? 'Invalid discovery options.'
+        : '--limit must be between 1 and 50.',
+    );
+  }
+  return { help, options: parsed.data };
+}
+
+export function parseLeverCliArgs(
+  args: string[],
+  configuredCompanies: LeverCompany[] = LEVER_COMPANIES,
+): ParsedLeverCli {
+  const candidate: DiscoveryOptions = {
+    limit: 100,
+    pages: 1,
+    remoteOnly: false,
+    query: '',
+    category: '',
+    apply: false,
+  };
+  const requestedCompanies: string[] = [];
+  let allCompanies = false;
+  let listCompanies = false;
+  let help = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--') continue;
+    if (argument === '--help') {
+      help = true;
+      continue;
+    }
+    if (argument === '--list-companies') {
+      listCompanies = true;
+      continue;
+    }
+    if (argument === '--all-companies') {
+      allCompanies = true;
+      continue;
+    }
+    if (argument === '--remote-only') {
+      candidate.remoteOnly = true;
+      continue;
+    }
+    if (argument === '--apply') {
+      candidate.apply = true;
+      continue;
+    }
+    if (argument === '--company') {
+      requestedCompanies.push(requiredValue(args, index, '--company'));
+      index += 1;
+      continue;
+    }
+    if (argument === '--limit') {
+      candidate.limit = integerOption(
+        requiredValue(args, index, '--limit'),
+        '--limit',
+      );
+      index += 1;
+      continue;
+    }
+    if (argument === '--query') {
+      candidate.query = requiredValue(args, index, '--query');
+      index += 1;
+      continue;
+    }
+    throw new DiscoveryCliError(`Unknown option: ${argument}`);
+  }
+
+  if (allCompanies && requestedCompanies.length > 0) {
+    throw new DiscoveryCliError(
+      'Use either --company or --all-companies, not both.',
+    );
+  }
+
+  const companies = allCompanies
+    ? configuredCompanies.filter((company) => company.enabled)
+    : requestedCompanies.map((requested) => {
+        if (/^https?:\/\//i.test(requested)) {
+          throw new DiscoveryCliError(
+            'Lever company selection does not accept URLs or arbitrary hosts.',
+          );
+        }
+        const normalized = requested.trim().toLocaleLowerCase();
+        const company = configuredCompanies.find(
+          (configured) =>
+            configured.site.toLocaleLowerCase() === normalized ||
+            configured.displayName.toLocaleLowerCase() === normalized,
+        );
+        if (!company || !company.enabled) {
+          throw new DiscoveryCliError(
+            `Unknown or disabled Lever company: ${requested}`,
+          );
+        }
+        return company;
+      });
+  const uniqueCompanies = [
+    ...new Map(
+      companies.map((company) => [
+        company.site.toLocaleLowerCase(),
+        company,
+      ]),
+    ).values(),
+  ];
+
+  if (!help && !listCompanies && uniqueCompanies.length === 0) {
+    throw new DiscoveryCliError(
+      'Select at least one company with --company or use --all-companies.',
+    );
+  }
+  if (uniqueCompanies.length > 10) {
+    throw new DiscoveryCliError(
+      'A Lever discovery run supports at most ten companies.',
+    );
+  }
+
+  const parsed = DiscoveryOptionsSchema.safeParse(candidate);
   if (!parsed.success) {
     throw new DiscoveryCliError(
       parsed.error.issues[0]?.message ?? 'Invalid discovery options.',
     );
   }
-  return { help, options: parsed.data };
+  return {
+    help,
+    listCompanies,
+    companies: uniqueCompanies,
+    options: parsed.data,
+  };
+}
+
+export function formatLeverCompanyList(
+  companies: LeverCompany[] = LEVER_COMPANIES,
+): string {
+  const lines = ['Configured Lever companies:'];
+  for (const company of companies) {
+    lines.push(
+      `- ${company.displayName} (${company.site}) — ${company.enabled ? 'enabled' : 'disabled'}`,
+    );
+  }
+  return lines.join('\n');
 }
 
 function loadVerifiedSkills(filePath: string): SkillEntry[] {
@@ -387,6 +568,46 @@ export async function runRemotiveCli(
       error instanceof RemotiveDiscoveryError
         ? error.message
         : 'The Remotive discovery run failed safely. No jobs were persisted.';
+    logError(`Error: ${message}`);
+    return { exitCode: 1, summary: null };
+  }
+}
+
+export async function runLeverCli(
+  args: string[],
+  dependencies: LeverCliDependencies = {},
+): Promise<{ exitCode: number; summary: DiscoveryRunSummary | null }> {
+  const log = dependencies.log ?? console.log;
+  const logError = dependencies.logError ?? console.error;
+  const configuredCompanies = dependencies.companies ?? LEVER_COMPANIES;
+
+  try {
+    const parsed = parseLeverCliArgs(args, configuredCompanies);
+    if (parsed.help) {
+      log(LEVER_CLI_HELP);
+      return { exitCode: 0, summary: null };
+    }
+    if (parsed.listCompanies) {
+      log(formatLeverCompanyList(configuredCompanies));
+      return { exitCode: 0, summary: null };
+    }
+
+    const summary = await executeDiscoveryCli(
+      parsed,
+      new LeverAdapter({
+        companies: parsed.companies,
+        fetchImpl: dependencies.fetchImpl,
+        timeoutMs: dependencies.timeoutMs,
+      }),
+      dependencies,
+    );
+    return { exitCode: 0, summary };
+  } catch (error) {
+    const message =
+      error instanceof DiscoveryCliError ||
+      error instanceof LeverDiscoveryError
+        ? error.message
+        : 'The Lever discovery run failed safely. No jobs were persisted.';
     logError(`Error: ${message}`);
     return { exitCode: 1, summary: null };
   }

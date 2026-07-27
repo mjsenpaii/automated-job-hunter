@@ -21,7 +21,10 @@ export function normalizeJob(raw: RawJobInput): NormalizedJob {
     city: raw.city ?? null,
     region: raw.region ?? null,
     work_setup: mapWorkSetup(raw.work_setup_hint),
-    work_setup_confidence: 0.5,
+    work_setup_confidence:
+      raw.work_setup_confidence === undefined
+        ? 0.5
+        : Math.max(0, Math.min(1, raw.work_setup_confidence)),
     work_setup_evidence: null,
     onsite_days_per_week: null,
     relocation_required: null,

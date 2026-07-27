@@ -1,9 +1,73 @@
 # Project Status
 
 **Last updated:** 2026-07-28 PHT
-**Current phase:** Phase 7.1A.2 — Remotive public-job adapter + manual dry run (implemented locally, uncommitted)
-**Overall health:** 🟢 273/273 tests passing (30 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
-**Active branch:** `master` at pushed baseline `dcf7df0` (Phase 7.1A.2 local changes uncommitted)
+**Current phase:** Phase 7.1A.3 — Lever public company-board discovery (implemented locally, uncommitted)
+**Overall health:** 🟢 296/296 tests passing (32 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
+**Active branch:** `master` at pushed baseline `4450073` (Phase 7.1A.3 local changes uncommitted)
+
+---
+
+## Session — Phase 7.1A.3 Lever Public Company-Board Discovery
+
+Added Lever as the third structured source on the committed reusable discovery
+core. No Trigger.dev scheduling, Gemini extraction, browser automation,
+application form, application package, message, or submission behavior was
+added.
+
+- Verified the official Lever Postings API before implementation. Published
+  company-board jobs remain publicly retrievable without authentication through
+  `GET https://api.lever.co/v0/postings/{site}`. The documented read API uses
+  `skip`/`limit` pagination; application submission is a separate authenticated
+  `POST` operation and is not called.
+- Added a versioned local seed with three live-verified global boards: Spotify
+  (`spotify`), Highspot (`highspot`), and Aleph (`aleph`). StackAdapt was
+  unavailable during verification and was not seeded; Wealthsimple responded
+  with no published records and was omitted from the initial active seed.
+- Added a fixed-host Lever adapter with a descriptive User-Agent, ten-second
+  timeout, response/per-record Zod validation, canonical hosted-URL validation,
+  at most ten configured companies, and at most 100 accepted jobs per run.
+  Rich-text opening, body, list/requirements, and additional sections reuse the
+  existing content cleaner.
+- Reused the common `DiscoveredJob` mapper, local filters, `ingestJob`,
+  eligibility, hard rejection, scoring, deduplication, atomic persistence,
+  `DISCOVERED` review status, and shared safe CLI summary. Optional team,
+  department, workplace type, and updated timestamp metadata are retained in
+  the source snapshot.
+- Corrected a shared integration boundary discovered by the Lever tests:
+  explicit structured work-setup evidence now carries source confidence into
+  normalization, so a Lever `remote`, `hybrid`, or `on-site` value is not
+  downgraded merely because the description does not repeat it. Country
+  eligibility remains a separate deterministic review and is never inferred
+  from the remote flag.
+- Added `pnpm discovery:lever` with repeatable `--company`,
+  `--all-companies`, `--list-companies`, `--limit`, `--remote-only`, `--query`,
+  `--apply`, and `--help`. Unknown/disabled identifiers, arbitrary URLs/hosts,
+  mixed selection modes, and selections above ten companies are rejected.
+  Dry-run remains the default.
+- Added 23 mocked tests covering all 26 requested adapter, selection, mapping,
+  filtering, limits, error, persistence, deduplication, pipeline reuse,
+  no-application, no-Gemini, and safe-output behaviors. Total: 296/296 tests
+  across 32 files.
+- The initial live dry run reported ten invalid records. A single redacted
+  diagnostic identified one mismatch only: eight Spotify records and two Aleph
+  records supplied string `workplaceType` values outside the public Postings
+  documentation's `on-site` spelling. Lever's official developer documentation
+  also defines the source enum variant `onsite`. The adapter now accepts that
+  one explicit provider variant and normalizes it to canonical `on-site`;
+  validation was not otherwise relaxed.
+- The corrected dry run fetched and validated 50/50 current records over three
+  official API requests, with zero invalid records. Local remote/developer
+  filters excluded 49. The existing pipeline scored one Spotify job as
+  `DISCOVERED` (score 39, `ARCHIVE`), with zero duplicates, hard rejections, or
+  pipeline errors. One job would have been persisted and zero were persisted.
+- SQLite was exactly unchanged. Before and after, counts were one job, one
+  score, zero applications, zero activity rows, and zero blacklist rows. SHA-256
+  hashes and lengths matched for `app.db`, `app.db-wal`, and `app.db-shm`.
+- Final verification passes: 296/296 tests, workspace build 6/6, standalone
+  dashboard production build, dashboard strict TypeScript, and
+  `git diff --check`.
+- File-backed Lever `--apply` was not run. Trigger.dev scheduling remains
+  deferred to Phase 7.1B.
 
 ---
 
@@ -190,7 +254,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive manual discovery implemented; Trigger.dev scheduling deferred to 7.1B |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever manual discovery implemented; Trigger.dev scheduling deferred to 7.1B |
 
 ---
 
@@ -203,7 +267,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 25 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
 | `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
-| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, Remotive, manual + **URL-import adapter (SSRF-hardened)** | 137 ✅ |
+| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, Remotive, Lever, manual + **URL-import adapter (SSRF-hardened)** | 160 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
 | `@job-app/dashboard` | Next.js productivity UI + hybrid Gemini importer + `ingestJob`-backed confirmation | 51 ✅ + build/runtime green |
 
@@ -224,6 +288,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `ea3b565` | feat: complete job URL importer and automated scoring validation | 141 |
 | `ee3bf0d` | feat: add Gemini job importer and government salary enrichment | 232 |
 | `dcf7df0` | feat: add public job discovery with Arbeitnow | 253 |
+| `4450073` | feat: add Remotive job discovery | 273 |
 | _(pending)_ | fix: dashboard build & runtime (workspace packages, DB, API routes) | 141 |
 
 ---

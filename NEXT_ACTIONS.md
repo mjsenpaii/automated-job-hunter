@@ -1,22 +1,24 @@
 # Next Actions
 
 **Last updated:** 2026-07-28 PHT
-**Current state:** Phase 7.1A.2 adds a Remotive adapter locally on top of the committed and pushed Arbeitnow discovery core. Both CLIs are dry-run by default, use the existing deterministic pipeline, and persist successful discoveries as `DISCOVERED` only with explicit `--apply`. The required Remotive live dry run fetched 36 records, matched five, and persisted none; SQLite content was byte-for-byte unchanged. Final verification passes with 273/273 tests across 30 files, workspace build 6/6, dashboard production build, and strict TypeScript. The Phase 7.1A.2 changes are uncommitted and unpushed.
+**Current state:** Phase 7.1A.3 adds selected public Lever company-board discovery on top of the committed Arbeitnow and Remotive discovery core. All three CLIs are dry-run by default, use the existing deterministic pipeline, and persist successful discoveries as `DISCOVERED` only with explicit `--apply`. Lever uses a versioned, live-verified seed for Spotify, Highspot, and Aleph, a fixed official API host, and no Gemini. A redacted diagnostic resolved the original ten invalid records as Lever's official `onsite` variant, now explicitly normalized to canonical `on-site`. The corrected dry run validated 50/50 records, matched/scored one, and persisted zero; all SQLite hashes and row counts were unchanged. Final verification passes with 296/296 tests across 32 files, workspace build 6/6, dashboard production build, and strict TypeScript. File-backed Lever apply mode was not run. Trigger.dev remains deferred to Phase 7.1B.
 
 ---
 
 ## Review this implementation
 
-1. Review the Phase 7.1A/7.1A.2 architecture and source-compliance notes in
+1. Review the Phase 7.1A/7.1A.2/7.1A.3 architecture and source-compliance notes in
    `docs/PUBLIC_JOB_DISCOVERY.md` and `docs/SOURCE_COMPLIANCE.md`.
 2. Run either safe manual dry run:
 
    ```powershell
    pnpm discovery:arbeitnow -- --limit 10 --pages 1 --remote-only
    pnpm discovery:remotive -- --limit 50 --query "developer"
+   pnpm discovery:lever -- --list-companies
+   pnpm discovery:lever -- --company spotify --company highspot --company aleph --remote-only --query "developer" --limit 50
    ```
 
-3. Do not use either source's `--apply` until its mapping and real dry-run preview are approved.
+3. Do not use any source's `--apply` until its mapping and real dry-run preview are approved.
 4. Keep Trigger.dev scheduling deferred to Phase 7.1B; its future task must call the reusable
    discovery runner rather than duplicate source or pipeline logic.
 5. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
@@ -45,14 +47,16 @@
   Retry-After-aware wait; there is no third request or fallback loop.
 - Authenticated pages should be pasted manually; login, CAPTCHA handling, browser automation, and
   automatic application submission remain intentionally out of scope.
-- Trigger.dev scheduling and Lever discovery remain deferred.
+- Trigger.dev scheduling remains deferred. Lever discovery is manual and
+  dry-run-first in Phase 7.1A.3.
 - Government salary enrichment currently supports only the verified 2026 DBM national-government
   schedule. Unsupported years, local-government roles, private employers, and unclear government
   coverage intentionally receive no reference range.
 - Existing saved rows are not automatically rewritten. The explicit
   `pnpm --filter @job-app/ingestion backfill:government` utility defaults to dry-run; use
   `-- --apply` only after reviewing its counts. Apply mode was not run in this session.
-- Arbeitnow and Remotive provide two structured sources. A remote flag or candidate region does not
+- Arbeitnow, Remotive, and Lever provide three structured source paths. A
+  remote flag, workplace type, or candidate region does not
   by itself establish Philippine eligibility, so the deterministic pipeline correctly leaves
   ambiguous eligibility as `REQUIRES_REVIEW`.
 - Arbeitnow source tags are preserved as source-provided job skills/categories; the adapter does
@@ -62,6 +66,14 @@
   how frequently manual runs should be performed.
 - Remotive source salary text is retained only when explicitly supplied. Missing currency, exact
   range, experience, schedule, closing date, and Philippine eligibility are not invented.
+- Lever is company-specific rather than a global feed. Only versioned,
+  live-verified site identifiers are accepted; the initial list is Spotify,
+  Highspot, and Aleph. A run accepts at most ten configured companies and 100
+  jobs. Unknown companies and arbitrary URLs/hosts are rejected.
+- Lever preserves visible commitment, team/department, workplace/location
+  evidence, dates, sections, stable posting ID, and canonical hosted URL.
+  Salary, skills, experience, closing date, and country eligibility remain
+  unknown.
 - Discovery is manual only. Trigger.dev scheduling, retries across task runs, and run monitoring
   remain Phase 7.1B work.
 
@@ -172,6 +184,7 @@ Resolution summary:
 
 - **Phase 6 — Browser Assistance** (Playwright) — NOT STARTED.
 - **Phase 7 — Limited Automation** (Trigger.dev) — NOT STARTED.
-- **Phase 7.1B — Trigger.dev scheduling** — DEFERRED until manual Arbeitnow and Remotive discovery are approved.
+- **Phase 7.1B — Trigger.dev scheduling** — DEFERRED until manual Arbeitnow,
+  Remotive, and Lever discovery are approved.
 - Additional source adapters (Gmail alerts, RSS/Atom).
 - Answer remaining candidate questions (Q6–Q12: salary, location, schedule, equipment, English level).

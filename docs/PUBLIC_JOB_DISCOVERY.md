@@ -3,8 +3,8 @@
 ## Phase 7.1A scope
 
 Phase 7.1A proves public, structured job discovery before Trigger.dev scheduling
-is introduced. It implements a reusable discovery core with two source
-adapters: Arbeitnow and Remotive.
+is introduced. It implements a reusable discovery core with three source
+adapters: Arbeitnow, Remotive, and selected public Lever company boards.
 
 The flow is:
 
@@ -66,6 +66,44 @@ The source response is structured, so Gemini is not used.
 Remotive's public feed is delayed by 24 hours. The source response is
 structured, so Gemini is not used.
 
+## Lever source
+
+- Official Postings API documentation:
+  https://github.com/lever/postings-api
+- Official access guidance:
+  https://hire.lever.co/developer/support
+- Fixed global API endpoint:
+  `https://api.lever.co/v0/postings/{configured-site}`
+- Authentication: none for read-only retrieval of published postings.
+- Company-specific discovery: Lever does not provide a global feed. Phase
+  7.1A.3 uses only the versioned, live-verified configuration in
+  `packages/ingestion/src/discovery/lever-companies.v1.ts`.
+- Verified initial boards (2026-07-28): Spotify (`spotify`), Highspot
+  (`highspot`), and Aleph (`aleph`).
+- Pagination: only documented `skip` and `limit` parameters are constructed on
+  the fixed API host. The adapter does not follow source-provided API URLs.
+- Runtime limits: at most ten configured companies and 100 accepted jobs across
+  one run.
+- Requests: descriptive User-Agent and a bounded ten-second timeout per
+  request.
+- Content: opening, description, requirements/list sections, and additional
+  rich text are cleaned using the existing content cleaner.
+- Workplace variants: Lever's public Postings documentation uses `on-site`,
+  while its official developer documentation also defines `onsite`. The source
+  schema explicitly accepts both and deterministically normalizes `onsite` to
+  canonical `on-site`. Other unknown values remain invalid.
+- Identity and attribution: the stable Lever posting ID and canonical
+  `jobs.lever.co` hosted-job URL are retained. The application-form URL is not
+  fetched or submitted.
+- Exclusions: no arbitrary sites or hosts, internal/hidden posting access,
+  employer-site crawling, application-form retrieval, login, cookies, CAPTCHA,
+  browser automation, rate-limit bypass, or application submission.
+
+The structured Lever response is mapped deterministically. Gemini is not used.
+An explicit Lever workplace type, or a location that explicitly says remote,
+may establish work setup for filtering; it does not establish Philippine
+country eligibility.
+
 ## Arbeitnow CLI
 
 Dry run is the default:
@@ -124,6 +162,47 @@ option. Query matching runs locally across title, company, category, tags,
 candidate location, and cleaned description. Category accepts a
 case-insensitive category name or slug.
 
+## Lever CLI
+
+List the configured seed without making a network request:
+
+```powershell
+pnpm discovery:lever -- --list-companies
+```
+
+Dry run is the default, and either a configured company selection or
+`--all-companies` is required:
+
+```powershell
+pnpm discovery:lever -- --company spotify --limit 25
+pnpm discovery:lever -- --company spotify --company highspot --remote-only
+pnpm discovery:lever -- --all-companies --query "developer" --limit 100
+```
+
+Persistence must be requested explicitly:
+
+```powershell
+pnpm discovery:lever -- --company spotify --apply
+```
+
+File-backed apply mode was not run during Phase 7.1A.3 implementation.
+
+Supported options:
+
+- `--company <configured-id-or-name>` (repeatable)
+- `--all-companies`
+- `--list-companies`
+- `--limit <1-100>`
+- `--remote-only`
+- `--query <text>`
+- `--apply`
+- `--help`
+
+Unknown or disabled companies, URLs, arbitrary hosts, and selections above ten
+companies are rejected before fetching. Query matching runs locally across
+title, company, team, department, location, commitment, and cleaned
+description.
+
 Dry runs open the existing SQLite database read-only for deduplication. They do
 not initialize schema or write database/WAL state. The summary omits full job
 descriptions and prints at most ten concise previews.
@@ -140,6 +219,6 @@ before shortlist, resume generation, or any future application action.
 
 ## Future Phase 7.1B
 
-Trigger.dev scheduling is intentionally deferred. A future task should call the
-same adapter and discovery runner rather than duplicating source, pipeline, or
-persistence logic.
+Trigger.dev scheduling is intentionally deferred. A future task should call
+these same adapters and the discovery runner rather than duplicating source,
+pipeline, or persistence logic.

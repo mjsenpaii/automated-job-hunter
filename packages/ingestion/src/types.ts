@@ -13,6 +13,7 @@ export interface RawJobInput {
   city?: string;
   region?: string;
   work_setup_hint?: string;
+  work_setup_confidence?: number;
   employment_type?: string;
   schedule?: string;
   salary_text?: string;
