@@ -1,108 +1,173 @@
-'use client';
+import Link from 'next/link';
+import { desc, eq } from 'drizzle-orm';
+import { jobs, job_scores } from '@job-app/db/schema';
+import { getDatabase } from '@/lib/db';
+import { AppIcon } from '@/components/icons';
+import { EmptyState } from '@/components/EmptyState';
+import { MetricCard } from '@/components/MetricCard';
+import { PageHeader } from '@/components/PageHeader';
+import StatusBadge from '@/components/StatusBadge';
 
-import { useState, useEffect } from 'react';
-import StatsCard from '@/components/StatsCard';
-import JobCard from '@/components/JobCard';
+export const dynamic = 'force-dynamic';
 
-export default function DashboardHome() {
-  const [stats, setStats] = useState<any>(null);
-  const [jobs, setJobs] = useState<any[]>([]);
+function formatDate(value: string): string {
+  if (!value) return 'Date unknown';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? 'Date unknown'
+    : new Intl.DateTimeFormat('en', {
+        month: 'short',
+        day: 'numeric',
+      }).format(date);
+}
 
-  useEffect(() => {
-    fetch('/api/stats')
-      .then(res => res.json())
-      .then(data => setStats(data))
-      .catch(console.error);
+export default async function DashboardHome() {
+  const db = getDatabase();
+  const jobRows = await db
+    .select({ job: jobs, score: job_scores })
+    .from(jobs)
+    .leftJoin(job_scores, eq(jobs.id, job_scores.job_id))
+    .orderBy(desc(jobs.created_at));
 
-    fetch('/api/jobs')
-      .then(res => res.json())
-      .then(data => {
-        const formattedJobs = data.map((j: any) => ({
-          id: j.job.id,
-          title: j.job.title,
-          company: j.job.company,
-          location: [j.job.city, j.job.country].filter(Boolean).join(', ') || 'Anywhere',
-          setup: j.job.work_setup,
-          score: j.score?.score || 0,
-          status: j.job.status,
-          postedAt: new Date(j.job.date_posted).toLocaleDateString()
-        }));
-        setJobs(formattedJobs.slice(0, 6));
-      })
-      .catch(console.error);
-  }, []);
+  const totalJobs = jobRows.length;
+  const awaitingReview = jobRows.filter(
+    ({ job }) =>
+      job.eligibility_status === 'REQUIRES_REVIEW' ||
+      ['DISCOVERED', 'INGESTED'].includes(job.status),
+  ).length;
+  const shortlisted = jobRows.filter(
+    ({ job }) => job.status === 'USER_APPROVED',
+  ).length;
+  const hardRejected = jobRows.filter(
+    ({ job }) => job.status === 'HARD_REJECTED',
+  ).length;
+  const recent = jobRows.slice(0, 6);
+
+  const nextAction =
+    totalJobs === 0
+      ? {
+          title: 'Import your first job',
+          description:
+            'Paste a listing and let Gemini prepare a reviewable draft before the existing pipeline scores it.',
+          href: '/import-job',
+          label: 'Import job',
+        }
+      : awaitingReview > 0
+        ? {
+            title: `Review ${awaitingReview} uncertain ${awaitingReview === 1 ? 'job' : 'jobs'}`,
+            description:
+              'These roles need a location or eligibility decision before you can rely on their recommendation.',
+            href: '/intl-jobs',
+            label: 'Open review queue',
+          }
+        : {
+            title: 'Add another opportunity',
+            description:
+              'Your current queue is classified. Import a new role when you find one worth evaluating.',
+            href: '/import-job',
+            label: 'Import job',
+          };
 
   return (
-    <div className="animate-fade-in">
-      <header className="mb-6">
-        <h1>Dashboard</h1>
-        <p>Overview of your job application pipeline</p>
-      </header>
+    <>
+      <PageHeader
+        eyebrow="Workspace"
+        title="Overview"
+        description="A concise view of imported opportunities and the decisions that need your attention."
+        action={
+          <Link href="/import-job" className="button button-primary">
+            <AppIcon name="import" size={18} />
+            Import job
+          </Link>
+        }
+      />
 
-      <div className="grid grid-cols-4 lg-grid-cols-2 md-grid-cols-1 gap-6 mb-6">
-        <StatsCard 
-          title="Total Jobs Scraped" 
-          value={stats?.totalJobs?.toLocaleString() || "0"} 
-          trend="Real-time data"
-          trendUp={true}
-          icon={
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-          }
+      <section className="metrics-grid" aria-label="Job pipeline metrics">
+        <MetricCard
+          label="Imported jobs"
+          value={totalJobs}
+          detail="All saved opportunities"
+          icon="briefcase"
+          tone="info"
         />
-        <StatsCard 
-          title="Shortlisted" 
-          value={stats?.shortlistedJobs?.toString() || "0"} 
-          trend="USER_APPROVED"
-          trendUp={true}
-          icon={
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          }
+        <MetricCard
+          label="Awaiting review"
+          value={awaitingReview}
+          detail="Eligibility or status check"
+          icon="clock"
+          tone="warning"
         />
-        <StatsCard 
-          title="Applied" 
-          value={stats?.appliedJobs?.toString() || "0"} 
-          trend="Applications sent"
-          trendUp={true}
-          icon={
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          }
+        <MetricCard
+          label="Shortlisted"
+          value={shortlisted}
+          detail="Approved by you"
+          icon="check"
+          tone="success"
         />
-        <StatsCard 
-          title="Average Score" 
-          value={stats?.averageScore?.toString() || "0"} 
-          trend="Overall match"
-          trendUp={true}
-          icon={
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          }
+        <MetricCard
+          label="Hard rejected"
+          value={hardRejected}
+          detail="Stopped before scoring"
+          icon="warning"
+          tone="danger"
         />
-      </div>
-
-      <section>
-        <div className="flex justify-between items-center mb-4">
-          <h2>Recent High-Scoring Jobs</h2>
-          <button className="btn btn-outline" style={{ padding: '0.5rem 1rem' }}>View All</button>
-        </div>
-        
-        <div className="grid grid-cols-3 lg-grid-cols-2 md-grid-cols-1 gap-6">
-          {jobs.map(job => (
-            <JobCard key={job.id} job={job} />
-          ))}
-          {jobs.length === 0 && (
-            <div className="col-span-3 text-center text-gray-500 py-8">
-              No jobs found. Go to Add Job to ingest some data.
-            </div>
-          )}
-        </div>
       </section>
-    </div>
+
+      {totalJobs === 0 ? (
+        <EmptyState
+          title="No imported jobs yet"
+          description="Start with a job URL, copied webpage, raw HTML, or a plain job description."
+          actionLabel="Import your first job"
+          actionHref="/import-job"
+          icon="import"
+        />
+      ) : (
+        <div className="dashboard-grid">
+          <section className="panel" aria-labelledby="recent-jobs-heading">
+            <div className="section-header">
+              <div>
+                <h2 id="recent-jobs-heading">Recent jobs</h2>
+                <p>Latest pipeline activity</p>
+              </div>
+              <Link href="/ph-jobs" className="text-link">
+                Browse all
+              </Link>
+            </div>
+            <div className="recent-list">
+              {recent.map(({ job, score }) => (
+                <Link
+                  href={`/jobs/${job.id}`}
+                  className="recent-row"
+                  key={job.id}
+                >
+                  <span className="recent-job">
+                    <strong>{job.title}</strong>
+                    <span>{job.company}</span>
+                  </span>
+                  <StatusBadge status={job.status} />
+                  <span className="recent-date">{formatDate(job.created_at)}</span>
+                  <span className={`score-cell${score ? '' : ' muted'}`}>
+                    {score ? `${score.score}/100` : '—'}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+
+          <aside className="panel next-action" aria-labelledby="next-action-heading">
+            <span className="next-action-icon">
+              <AppIcon name="spark" />
+            </span>
+            <p className="eyebrow">Recommended next action</p>
+            <h2 id="next-action-heading">{nextAction.title}</h2>
+            <p>{nextAction.description}</p>
+            <Link href={nextAction.href} className="button button-primary">
+              {nextAction.label}
+              <AppIcon name="arrowRight" size={17} />
+            </Link>
+          </aside>
+        </div>
+      )}
+    </>
   );
 }

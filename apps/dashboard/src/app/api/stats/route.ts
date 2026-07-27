@@ -8,7 +8,9 @@ export async function GET() {
     const db = getDatabase();
     const statsResult = await db.select({
       totalJobs: sql<number>`count(${jobs.id})`,
+      awaitingReviewJobs: sql<number>`sum(case when ${jobs.eligibility_status} = 'REQUIRES_REVIEW' or ${jobs.status} in ('DISCOVERED', 'INGESTED') then 1 else 0 end)`,
       shortlistedJobs: sql<number>`sum(case when ${jobs.status} = 'USER_APPROVED' then 1 else 0 end)`,
+      hardRejectedJobs: sql<number>`sum(case when ${jobs.status} = 'HARD_REJECTED' then 1 else 0 end)`,
       appliedJobs: sql<number>`sum(case when ${jobs.status} = 'APPLIED' then 1 else 0 end)`,
       averageScore: sql<number>`avg(${job_scores.score})`
     }).from(jobs).leftJoin(job_scores, sql`${jobs.id} = ${job_scores.job_id}`);
@@ -17,7 +19,9 @@ export async function GET() {
 
     return NextResponse.json({
       totalJobs: Number(stats.totalJobs) || 0,
+      awaitingReviewJobs: Number(stats.awaitingReviewJobs) || 0,
       shortlistedJobs: Number(stats.shortlistedJobs) || 0,
+      hardRejectedJobs: Number(stats.hardRejectedJobs) || 0,
       appliedJobs: Number(stats.appliedJobs) || 0,
       averageScore: Math.round(Number(stats.averageScore) || 0)
     });

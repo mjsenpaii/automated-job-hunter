@@ -8,11 +8,13 @@ export interface RawJobInput {
   company: string;
   description: string;
   date_posted?: string;
+  date_expires?: string;
   country?: string;
   city?: string;
   region?: string;
   work_setup_hint?: string;
   employment_type?: string;
+  schedule?: string;
   salary_text?: string;
   required_skills?: string[];
   preferred_skills?: string[];

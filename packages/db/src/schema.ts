@@ -24,6 +24,24 @@ export const jobs = sqliteTable('jobs', {
   salary_max: real('salary_max'),
   salary_currency: text('salary_currency'),
   salary_period: text('salary_period'),
+  salary_grade: integer('salary_grade'),
+  salary_step: integer('salary_step'),
+  salary_reference_min: real('salary_reference_min'),
+  salary_reference_max: real('salary_reference_max'),
+  salary_reference_currency: text('salary_reference_currency'),
+  salary_reference_period: text('salary_reference_period'),
+  salary_reference_schedule_year: integer('salary_reference_schedule_year'),
+  salary_reference_source: text('salary_reference_source'),
+  salary_is_reference_only: integer('salary_is_reference_only', {
+    mode: 'boolean',
+  }),
+  compensation_note: text('compensation_note'),
+  vacancies: integer('vacancies'),
+  application_email: text('application_email'),
+  application_addressee: text('application_addressee'),
+  civil_service_eligibility: text('civil_service_eligibility'),
+  schedule_notes: text('schedule_notes'), // JSON stringified array
+  government_scope: text('government_scope'),
   years_experience_min: integer('years_experience_min'),
   required_skills: text('required_skills').notNull(), // JSON stringified array
   preferred_skills: text('preferred_skills').notNull(), // JSON stringified array
@@ -39,6 +57,8 @@ export const jobs = sqliteTable('jobs', {
     statusIdx: index('jobs_status_idx').on(table.status),
     categoryIdx: index('jobs_category_idx').on(table.category),
     companyIdx: index('jobs_company_idx').on(table.company),
+    salaryGradeIdx: index('jobs_salary_grade_idx').on(table.salary_grade),
+    governmentScopeIdx: index('jobs_government_scope_idx').on(table.government_scope),
   };
 });
 

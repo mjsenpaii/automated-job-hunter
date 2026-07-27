@@ -1,6 +1,13 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
+import { AppShell } from '@/components/AppShell';
+
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+});
 
 export const metadata: Metadata = {
   title: 'Job Application AI',
@@ -13,14 +20,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <body>
-        <div className="app-container">
-          <Sidebar />
-          <main className="main-content">
-            {children}
-          </main>
-        </div>
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

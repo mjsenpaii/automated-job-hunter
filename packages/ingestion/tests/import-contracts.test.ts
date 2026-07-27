@@ -110,6 +110,17 @@ describe('import-contracts — confirm validation', () => {
     const result = validateConfirmScoreRequest({ ...valid, salary_text: null });
     expect(result.ok).toBe(true);
   });
+
+  it('allows reviewed pasted content without inventing a source URL', () => {
+    const result = validateConfirmScoreRequest({
+      ...valid,
+      url: null,
+      country: null,
+      city: null,
+      location: 'Remote — global',
+    });
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('import-contracts — extraction missing fields', () => {
@@ -251,5 +262,19 @@ describe('import-contracts — JobImportResult narrowing', () => {
       expect(result.status).toBe('HARD_REJECTED');
       expect(result.score).toBeNull();
     }
+  });
+
+  it('does not invent a fallback reason when a rejected result has none', () => {
+    const result = toJobImportResult({
+      status: 'HARD_REJECTED',
+      job_id: 'job-with-broken-legacy-result',
+      rejection_reasons: [],
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        code: 'UNPROCESSABLE',
+      }),
+    );
   });
 });

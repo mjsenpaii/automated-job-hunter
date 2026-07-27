@@ -69,12 +69,12 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       normalized_job: normalized,
       score_detail: scoreResult
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Pipeline Error:", error);
     return {
       job_id: '',
       status: 'ERROR',
-      error: error.message
+      error: error instanceof Error ? error.message : 'Unknown ingestion error',
     };
   }
 }

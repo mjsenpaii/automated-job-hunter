@@ -1,7 +1,45 @@
 # Next Actions
 
-**Last updated:** 2026-07-26T22:30 PHT
-**Current state:** 172/172 tests passing (21 files). Import-flow reliability/UX pass is implemented locally (awaiting commit approval): null-safe scoring UI, shared Zod contracts, required-field completion, error boundary, duplicate detection against DB.
+**Last updated:** 2026-07-28 PHT
+**Current state:** Gemini hybrid importer, professional dashboard redesign, job export, and deterministic Philippine national-government salary-grade enrichment are hardened locally for review. The local jobs database was explicitly cleared on 2026-07-28 and currently contains zero jobs. 232/232 tests pass across 26 files. No commit or push has been made.
+
+---
+
+## Review this implementation
+
+1. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
+   detail pages.
+2. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
+   to a `NEXT_PUBLIC_*` variable. Optional model overrides are `GEMINI_PRIMARY_MODEL` and
+   `GEMINI_FALLBACK_MODEL`. An existing `GEMINI_MODEL` is supported only as a legacy fallback
+   override.
+3. If a development server is already using `apps/dashboard/.next`, stop it before running
+   `pnpm build`; concurrent Next dev/build processes can contend for the same output directory.
+4. If the implementation is accepted, create a commit only after explicit user approval.
+5. Review the PSA Salary Grade 6 import and its explicit “reference only” treatment. The committed
+   2026 DBM schedule and enrichment rules are documented in
+   `docs/GOVERNMENT_SALARY_ENRICHMENT.md`.
+
+### Known limitations
+
+- Local SQLite is a single-file store. WAL helps readers, but concurrent writers can still contend;
+  keep manual imports serialized when running multiple local processes.
+- Legacy schema columns require an empty-string sentinel for unknown posting dates. Extracted
+  unknown dates remain semantically absent in the structured snapshot.
+- Gemini cannot recover facts that are not present or visible in the supplied public content.
+- The identical-input cache is intentionally process-local, memory-only, bounded to 32 entries, and
+  expires after two minutes. It is not shared across processes or restarts.
+- The two-call ceiling means a fallback 429/5xx error is returned immediately after the bounded
+  Retry-After-aware wait; there is no third request or fallback loop.
+- Authenticated pages should be pasted manually; login, CAPTCHA handling, browser automation, and
+  automatic application submission remain intentionally out of scope.
+- Trigger.dev scheduling and Lever discovery remain deferred.
+- Government salary enrichment currently supports only the verified 2026 DBM national-government
+  schedule. Unsupported years, local-government roles, private employers, and unclear government
+  coverage intentionally receive no reference range.
+- Existing saved rows are not automatically rewritten. The explicit
+  `pnpm --filter @job-app/ingestion backfill:government` utility defaults to dry-run; use
+  `-- --apply` only after reviewing its counts. Apply mode was not run in this session.
 
 ---
 
@@ -14,19 +52,33 @@ pnpm build
 pnpm --filter @job-app/dashboard dev
 ```
 
-Then open http://localhost:3000. **Import URL** page: http://localhost:3000/import-job
+Then open http://localhost:3000. **Import Job** page: http://localhost:3000/import-job
 
 > The dashboard consumes the workspace packages as compiled `dist`, so build the packages
 > (`pnpm build`, or at least once) before `dev`/`build`. See
 > `apps/dashboard/README.md` → "Workspace packages & build strategy".
 
-### Quick test of the URL importer
+### Quick test of the unified importer
 1. Start the dashboard (command above).
-2. Go to **Import URL** in the sidebar (`/import-job`).
-3. Paste a public job-posting URL and click **Scan posting**.
-4. If required fields are missing, complete the highlighted inputs, then **Confirm and score**.
+2. Go to **Import Job** in the sidebar (`/import-job`).
+3. Paste a public URL, copied webpage, raw HTML, or plain job description and press Enter.
+4. Review Gemini's structured extraction, edit any fields, then select **Confirm & Score**.
 5. Hard-rejected / ineligible jobs show **Not evaluated** plus rejection reasons (never a fake score).
 6. Private, loopback, and link-local URLs remain blocked before any fetch.
+7. A saved job detail page provides **Copy all details** and **Download .txt** actions in its
+   header. Both include the complete sanitized job, decision, score, application, and raw source
+   snapshot without changing the database. The decision controls now sit in a compact full-width
+   bar above a full-width, non-scrolling tab workspace. **Generate resume** remains visible as a
+   clearly disabled **Soon** action after the two export buttons, keeping Shortlist/Reject compact.
+8. Desktop/laptop navigation can collapse to a 72px labelled icon rail and expand again. The
+   control is centred across the sidebar/content boundary, the preference is stored locally, and
+   mobile continues to use the existing bottom navigation.
+9. Job detail headers use explicit **Position** and **Company** labels. The redundant overview back
+   link and idle export-helper sentence were removed.
+10. Philippine national-government jobs with an explicit salary grade and a supported posting year
+    can show a separate DBM reference range. Contract-of-Service postings keep actual salary empty
+    unless the source explicitly states compensation. Government metadata remains editable before
+    confirmation and is included in both text exports.
 
 Fast unit check of the extractor + SSRF guards (no network):
 ```powershell

@@ -35,7 +35,10 @@ the single, consistent strategy for the whole repo:
   or `... build` directly, run `pnpm build` (or build the packages) at least once first so `dist`
   exists. Editing package source requires a rebuild to take effect in the dashboard.
 - **Tests are unaffected:** Vitest resolves `@job-app/*` to `src` via its own config aliases, so the
-  141-test suite always runs against source regardless of the `dist` strategy.
+  test suite always runs against source regardless of the `dist` strategy.
+- When a development server already owns `.next`, production verification can
+  use an isolated output directory without stopping it:
+  `$env:JOB_APP_NEXT_DIST_DIR='.next-validation'; pnpm --filter @job-app/dashboard build`.
 
 ### Database
 
@@ -47,16 +50,50 @@ import) and `getDb()` calls `ensureSchema()` to create tables on first connect, 
 `/api/jobs` return valid JSON against a fresh `data/app.db`. API routes always return structured
 JSON (including errors) — never HTML 500s.
 
-## Import a job from a URL
+Government salary-grade metadata uses additive nullable columns and version-2
+snapshots. The DBM schedule, legal boundary, and dry-run-first backfill command
+are documented in `docs/GOVERNMENT_SALARY_ENRICHMENT.md`.
 
-The dashboard can import a public job posting directly from its URL.
+## Unified Gemini job importer
+
+`/import-job` accepts a public URL, copied webpage, raw HTML, or plain job
+description. `/add-job` is a compatibility redirect to the unified page.
 
 1. Start the dev server: `pnpm --filter @job-app/dashboard dev`.
-2. Open **Import URL** in the sidebar (`/import-job`).
-3. Paste a public job-posting URL and click **Extract Job Data**. Extraction tries JSON-LD (`JobPosting`) first, then Open Graph / meta tags, then an HTML heuristic — with a per-field confidence badge.
-4. Review and edit the extracted fields in the preview, then **Confirm & Score** to normalize, classify, check eligibility, and score the job.
+2. Open **Import Job** in the sidebar.
+3. Paste the source and press Enter to analyse it.
+4. Review and edit the extracted fields.
+5. Select **Confirm & Score** to run the existing deterministic validation,
+   normalization, eligibility, hard-rejection, deduplication, scoring, and
+   persistence pipeline.
 
-Extraction is backed by `POST /api/extract` → `extractFromUrl()` in `@job-app/ingestion`. The endpoint applies SSRF protections (scheme allow-list, private/loopback/link-local IPv4+IPv6 blocking, DNS-resolution checks, per-redirect-hop validation, request timeout, and a response-size cap). See `docs/SECURITY.md` → "URL Importer — SSRF Protection". Private/loopback/link-local URLs are rejected before any network request. The importer only reads public postings — it never performs authenticated scraping, CAPTCHA bypass, or application submission.
+Nothing is scored or persisted during Gemini extraction. For URL input,
+`POST /api/analyze-job` first uses the existing SSRF-protected
+`extractFromUrl()` adapter, then converts the fetched HTML to readable text.
+See `docs/SECURITY.md` → "URL Importer — SSRF Protection".
+
+### Server-only Gemini configuration
+
+Set these only in a local server environment such as `.env.local`:
+
+```dotenv
+GEMINI_API_KEY=
+GEMINI_PRIMARY_MODEL=gemini-3.5-flash-lite
+GEMINI_FALLBACK_MODEL=gemini-3.6-flash
+```
+
+Every analysis starts with the primary model. The fallback model is called at
+most once and only when the first result fails the reliability checks or a
+retryable provider request. The SDK's own retries are disabled so one analysis
+can never exceed two model requests.
+
+For backward compatibility, an existing `GEMINI_MODEL` value is used only as
+the fallback-model override when `GEMINI_FALLBACK_MODEL` is absent. It never
+replaces the default primary pass. Do not use `NEXT_PUBLIC_*` for any Gemini
+setting.
+
+Identical cleaned input is deduplicated with a bounded, two-minute in-memory
+cache. The cache is process-local and never writes pasted content to disk.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

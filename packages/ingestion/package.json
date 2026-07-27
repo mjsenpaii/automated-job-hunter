@@ -13,11 +13,20 @@
     "./import-contracts": {
       "types": "./dist/import-contracts.d.ts",
       "default": "./dist/import-contracts.js"
+    },
+    "./gemini-contracts": {
+      "types": "./dist/gemini-contracts.d.ts",
+      "default": "./dist/gemini-contracts.js"
+    },
+    "./government-enrichment": {
+      "types": "./dist/government-enrichment.d.ts",
+      "default": "./dist/government-enrichment.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "backfill:government": "node dist/backfill-government-metadata.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

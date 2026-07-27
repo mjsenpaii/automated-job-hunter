@@ -3,7 +3,9 @@ packages:
   - "apps/*"
 allowBuilds:
   '@depot/cli': true
+  '@google/genai': true
   better-sqlite3: true
   es5-ext: false
   esbuild: true
+  protobufjs: true
   sharp: false

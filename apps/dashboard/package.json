@@ -8,15 +8,17 @@
     "start": "next start"
   },
   "dependencies": {
+    "@google/genai": "^2.13.0",
+    "@job-app/classification": "workspace:*",
+    "@job-app/core": "workspace:*",
+    "@job-app/db": "workspace:*",
+    "@job-app/ingestion": "workspace:*",
+    "@job-app/scoring": "workspace:*",
+    "drizzle-orm": "^0.30.10",
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "drizzle-orm": "^0.30.10",
-    "@job-app/core": "workspace:*",
-    "@job-app/db": "workspace:*",
-    "@job-app/classification": "workspace:*",
-    "@job-app/scoring": "workspace:*",
-    "@job-app/ingestion": "workspace:*"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20",

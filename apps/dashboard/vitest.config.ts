@@ -16,6 +16,15 @@ export default defineConfig({
         __dirname,
         '../../packages/ingestion/src/import-contracts.ts',
       ),
+      '@job-app/ingestion/gemini-contracts': path.resolve(
+        __dirname,
+        '../../packages/ingestion/src/gemini-contracts.ts',
+      ),
+      '@job-app/ingestion/government-enrichment': path.resolve(
+        __dirname,
+        '../../packages/ingestion/src/government-enrichment.ts',
+      ),
+      'server-only': path.resolve(__dirname, './tests/server-only.ts'),
       '@job-app/classification': path.resolve(__dirname, '../../packages/classification/src'),
       '@job-app/scoring': path.resolve(__dirname, '../../packages/scoring/src'),
       '@job-app/db': path.resolve(__dirname, '../../packages/db/src'),

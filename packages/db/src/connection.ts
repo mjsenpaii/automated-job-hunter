@@ -46,6 +46,22 @@ export function ensureSchema(sqlite: Database.Database): void {
       salary_max REAL,
       salary_currency TEXT,
       salary_period TEXT,
+      salary_grade INTEGER,
+      salary_step INTEGER,
+      salary_reference_min REAL,
+      salary_reference_max REAL,
+      salary_reference_currency TEXT,
+      salary_reference_period TEXT,
+      salary_reference_schedule_year INTEGER,
+      salary_reference_source TEXT,
+      salary_is_reference_only INTEGER,
+      compensation_note TEXT,
+      vacancies INTEGER,
+      application_email TEXT,
+      application_addressee TEXT,
+      civil_service_eligibility TEXT,
+      schedule_notes TEXT,
+      government_scope TEXT,
       years_experience_min INTEGER,
       required_skills TEXT NOT NULL,
       preferred_skills TEXT NOT NULL,
@@ -107,10 +123,48 @@ export function ensureSchema(sqlite: Database.Database): void {
     );
   `);
 
-  // Defensive, idempotent column migration for databases created before
-  // `rejection_reasons` existed (CREATE TABLE IF NOT EXISTS won't add columns).
+  // Defensive, idempotent additive migration for older local databases.
+  // This changes schema only; it never rewrites existing job rows.
   const jobsColumns = sqlite.prepare(`PRAGMA table_info(jobs)`).all() as { name: string }[];
-  if (!jobsColumns.some((c) => c.name === 'rejection_reasons')) {
-    sqlite.exec(`ALTER TABLE jobs ADD COLUMN rejection_reasons TEXT`);
+  const additiveColumns: ReadonlyArray<{ name: string; sql: string }> = [
+    { name: 'rejection_reasons', sql: 'rejection_reasons TEXT' },
+    { name: 'salary_grade', sql: 'salary_grade INTEGER' },
+    { name: 'salary_step', sql: 'salary_step INTEGER' },
+    { name: 'salary_reference_min', sql: 'salary_reference_min REAL' },
+    { name: 'salary_reference_max', sql: 'salary_reference_max REAL' },
+    {
+      name: 'salary_reference_currency',
+      sql: 'salary_reference_currency TEXT',
+    },
+    { name: 'salary_reference_period', sql: 'salary_reference_period TEXT' },
+    {
+      name: 'salary_reference_schedule_year',
+      sql: 'salary_reference_schedule_year INTEGER',
+    },
+    { name: 'salary_reference_source', sql: 'salary_reference_source TEXT' },
+    {
+      name: 'salary_is_reference_only',
+      sql: 'salary_is_reference_only INTEGER',
+    },
+    { name: 'compensation_note', sql: 'compensation_note TEXT' },
+    { name: 'vacancies', sql: 'vacancies INTEGER' },
+    { name: 'application_email', sql: 'application_email TEXT' },
+    { name: 'application_addressee', sql: 'application_addressee TEXT' },
+    {
+      name: 'civil_service_eligibility',
+      sql: 'civil_service_eligibility TEXT',
+    },
+    { name: 'schedule_notes', sql: 'schedule_notes TEXT' },
+    { name: 'government_scope', sql: 'government_scope TEXT' },
+  ];
+  const existingNames = new Set(jobsColumns.map((column) => column.name));
+  for (const column of additiveColumns) {
+    if (!existingNames.has(column.name)) {
+      sqlite.exec(`ALTER TABLE jobs ADD COLUMN ${column.sql}`);
+    }
   }
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS jobs_salary_grade_idx ON jobs (salary_grade);
+    CREATE INDEX IF NOT EXISTS jobs_government_scope_idx ON jobs (government_scope);
+  `);
 }

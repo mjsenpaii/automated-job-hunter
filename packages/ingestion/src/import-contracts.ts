@@ -10,6 +10,11 @@
 
 import { z } from 'zod';
 import { ScoreRecommendation, StructuredScoreSchema } from '@job-app/core';
+import {
+  GeminiEvidenceSchema,
+  GeminiExtractionMetadataSchema,
+} from './gemini-contracts.js';
+import { GovernmentScopeSchema } from './government-enrichment.js';
 
 export type { ExtractedJobData, ExtractionResult } from './types.js';
 
@@ -34,12 +39,16 @@ export const ConfirmScoreRequestSchema = z
     company: nonEmpty('Company name', 200),
     description: nonEmpty('Job description', 50_000),
     url: z
-      .string({ required_error: 'Source URL is required.' })
+      .string()
       .trim()
       .url('Enter a valid http(s) URL.')
-      .max(2000, 'Source URL is too long.'),
+      .max(2000, 'Source URL is too long.')
+      .optional()
+      .nullable(),
+    source_site: z.string().trim().max(200).optional().nullable(),
     country: z.string().trim().max(120).optional().nullable(),
     city: z.string().trim().max(120).optional().nullable(),
+    location: z.string().trim().max(300).optional().nullable(),
     work_setup: z.enum(['REMOTE', 'HYBRID', 'ONSITE', 'TEMPORARY_REMOTE', 'UNCLEAR'], {
       required_error: 'Work setup is required.',
       invalid_type_error: 'Work setup is required.',
@@ -47,12 +56,38 @@ export const ConfirmScoreRequestSchema = z
     employment_type: z.string().trim().max(80).optional().nullable(),
     skills: z.string().trim().max(2000).optional().nullable(),
     salary_text: z.string().trim().max(200).optional().nullable(),
+    salary_min: z.number().nonnegative().optional().nullable(),
+    salary_max: z.number().nonnegative().optional().nullable(),
+    salary_currency: z.string().trim().max(20).optional().nullable(),
+    salary_grade: z.number().int().min(1).max(33).optional().nullable(),
+    salary_step: z.number().int().min(1).max(8).optional().nullable(),
+    hours_per_week: z.number().nonnegative().max(168).optional().nullable(),
+    date_posted: z.string().trim().max(80).optional().nullable(),
+    date_updated: z.string().trim().max(80).optional().nullable(),
+    closing_date: z.string().date().optional().nullable(),
+    timezone_or_schedule: z.string().trim().max(500).optional().nullable(),
     seniority: z.string().trim().max(80).optional().nullable(),
+    vacancies: z.number().int().positive().optional().nullable(),
+    civil_service_eligibility: z.string().trim().max(1000).optional().nullable(),
+    schedule_notes: z.array(z.string().trim().min(1).max(1000)).max(100).default([]),
+    government_scope: GovernmentScopeSchema.optional().nullable(),
+    responsibilities: z.array(z.string().trim().min(1).max(1000)).max(100).default([]),
+    requirements: z.array(z.string().trim().min(1).max(1000)).max(100).default([]),
+    required_years_experience: z.number().nonnegative().max(50).optional().nullable(),
+    preferred_years_experience: z.number().nonnegative().max(50).optional().nullable(),
+    application_instructions: z.array(z.string().trim().min(1).max(1000)).max(100).default([]),
+    application_keyword: z.string().trim().max(200).optional().nullable(),
+    application_email: z.string().trim().email().max(320).optional().nullable(),
+    application_addressee: z.string().trim().max(500).optional().nullable(),
+    application_url: z.string().trim().url().max(2000).optional().nullable(),
+    evidence: z.array(GeminiEvidenceSchema).max(40).default([]),
+    extraction_metadata: GeminiExtractionMetadataSchema.optional(),
   })
   .superRefine((data, ctx) => {
     const country = (data.country ?? '').trim();
     const city = (data.city ?? '').trim();
-    if (!country && !city) {
+    const location = (data.location ?? '').trim();
+    if (!country && !city && !location) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Location or country is required.',
@@ -68,7 +103,6 @@ export const CONFIRM_REQUIRED_FIELDS = [
   'title',
   'company',
   'description',
-  'url',
   'location',
   'work_setup',
 ] as const;
@@ -113,6 +147,7 @@ export function getMissingConfirmFields(draft: {
   url?: string | null;
   country?: string | null;
   city?: string | null;
+  location?: string | null;
   work_setup?: string | null;
 }): ConfirmRequiredField[] {
   const missing: ConfirmRequiredField[] = [];
@@ -121,8 +156,9 @@ export function getMissingConfirmFields(draft: {
   if (blank(draft.title)) missing.push('title');
   if (blank(draft.company)) missing.push('company');
   if (blank(draft.description)) missing.push('description');
-  if (blank(draft.url)) missing.push('url');
-  if (blank(draft.country) && blank(draft.city)) missing.push('location');
+  if (blank(draft.country) && blank(draft.city) && blank(draft.location)) {
+    missing.push('location');
+  }
   // UNCLEAR is a valid explicit choice — only treat as missing when unset.
   if (blank(draft.work_setup)) missing.push('work_setup');
 
@@ -142,6 +178,13 @@ export const ApiErrorCode = z.enum([
   'INTERNAL_ERROR',
   'NOT_FOUND',
   'INVALID_JSON',
+  'INPUT_TOO_LARGE',
+  'MODEL_NOT_CONFIGURED',
+  'MODEL_CONFIGURATION_INVALID',
+  'MODEL_UNAVAILABLE',
+  'MODEL_RATE_LIMITED',
+  'MODEL_TIMEOUT',
+  'MODEL_OUTPUT_INVALID',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 
@@ -310,12 +353,18 @@ export function toJobImportResult(input: {
   const reasons = input.rejection_reasons ?? [];
 
   if (input.status === 'HARD_REJECTED') {
+    if (reasons.length === 0) {
+      return apiError(
+        'UNPROCESSABLE',
+        'The pipeline rejected this job without returning a reason, so it was not saved.',
+      );
+    }
     const isEligibility = reasons.some((r) => ELIGIBILITY_REJECT_REASONS.has(r));
     const base = {
       success: true as const,
       jobId: input.job_id,
       score: null,
-      rejectionReasons: reasons.length > 0 ? reasons : ['REJECTED'],
+      rejectionReasons: reasons,
       eligibilityStatus: input.eligibility_status ?? null,
       title: input.title,
       company: input.company,

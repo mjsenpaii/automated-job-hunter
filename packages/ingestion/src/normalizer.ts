@@ -15,7 +15,7 @@ export function normalizeJob(raw: RawJobInput): NormalizedJob {
     company: raw.company,
     description: raw.description,
     date_posted: raw.date_posted ?? null,
-    date_expires: null,
+    date_expires: raw.date_expires ?? null,
     date_ingested: new Date().toISOString(),
     country: raw.country ?? null,
     city: raw.city ?? null,
@@ -30,7 +30,7 @@ export function normalizeJob(raw: RawJobInput): NormalizedJob {
     eligibility_text: raw.eligibility_text ?? null,
     employment_type: mapEmploymentType(raw.employment_type),
     contract_type: null,
-    schedule: null,
+    schedule: raw.schedule ?? null,
     timezone_overlap: null,
     salary_min,
     salary_max,
@@ -90,9 +90,23 @@ export function parseYearsExperience(text: string): number | null {
   return Math.max(...found);
 }
 
-function parseSalary(text?: string) {
+export function parseSalary(text?: string) {
   if (!text) {
     return { salary_min: null, salary_max: null, salary_currency: null, salary_period: null };
+  }
+  // A salary grade is a classification, not an offered amount. Keep it out of
+  // the actual salary fields even though it contains a number.
+  if (
+    /^\s*(?:salary\s*grade|sg)\s*[-:]?\s*\d{1,2}(?:\s*,?\s*step\s*\d)?\s*$/i.test(
+      text,
+    )
+  ) {
+    return {
+      salary_min: null,
+      salary_max: null,
+      salary_currency: null,
+      salary_period: null,
+    };
   }
   // Loose parsing implementation (can be improved)
   let currency = null;
