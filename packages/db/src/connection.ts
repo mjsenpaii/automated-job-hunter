@@ -15,6 +15,23 @@ export function getDb(dbPath: string = './data/app.db'): BetterSQLite3Database<t
 }
 
 /**
+ * Opens an existing SQLite database without schema initialization or writes.
+ *
+ * Discovery dry runs use this boundary so merely evaluating source jobs cannot
+ * create a database, change WAL state, or run additive schema migrations.
+ */
+export function getReadonlyDb(
+  dbPath: string,
+): BetterSQLite3Database<typeof schema> {
+  const sqlite = new Database(dbPath, {
+    readonly: true,
+    fileMustExist: true,
+  });
+  sqlite.pragma('query_only = ON');
+  return drizzle(sqlite, { schema });
+}
+
+/**
  * Idempotently creates the tables/indexes the app needs (local-first SQLite).
  *
  * Mirrors `schema.ts` using `CREATE TABLE IF NOT EXISTS`, so a fresh database file

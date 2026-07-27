@@ -1,6 +1,7 @@
 # Source Compliance Framework
 
-**IMPORTANT**: No sources are enabled yet. No source should be enabled until documented here.
+**IMPORTANT**: Only sources explicitly approved below are enabled. New sources
+must be documented before implementation.
 
 ## Source Documentation Template
 For every job board or data source, document the following before enabling:
@@ -12,3 +13,26 @@ For every job board or data source, document the following before enabling:
 - **Permitted Automation**: 
 - **Restrictions**: 
 - **Compliance Status**: (Approved / Pending / Rejected)
+
+---
+
+## Arbeitnow public job API
+
+- **Name**: Arbeitnow
+- **Access Method**: Official public JSON API
+- **Endpoint**: `https://www.arbeitnow.com/api/job-board-api`
+- **Official documentation**: https://www.arbeitnow.com/blog/job-board-api
+- **Authentication**: No API key
+- **ToS Summary**: The API response identifies it as a free public jobs API,
+  asks clients not to abuse it, requests attribution, and documents `?page=`
+  pagination. The adapter preserves Arbeitnow attribution and canonical URLs.
+- **Rate Limits**: No numeric public limit is stated in the official
+  documentation reviewed for Phase 7.1A. This repository conservatively caps a
+  manual run at three pages and 50 accepted jobs.
+- **Permitted Automation**: Read-only retrieval of public structured job data
+  through the documented API.
+- **Restrictions**: Fixed Arbeitnow API host only; no employer-page crawling,
+  authentication, CAPTCHA handling, rate-limit bypass, application creation, or
+  submission.
+- **Compliance Status**: Approved for manual dry-run-first discovery in Phase
+  7.1A. Trigger.dev scheduling remains disabled pending Phase 7.1B review.

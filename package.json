@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "turbo run lint",
+    "discovery:arbeitnow": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:arbeitnow",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {

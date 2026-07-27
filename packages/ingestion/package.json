@@ -21,12 +21,17 @@
     "./government-enrichment": {
       "types": "./dist/government-enrichment.d.ts",
       "default": "./dist/government-enrichment.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery/contracts.d.ts",
+      "default": "./dist/discovery/contracts.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "backfill:government": "node dist/backfill-government-metadata.js",
+    "discovery:arbeitnow": "node dist/discovery/arbeitnow-cli.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

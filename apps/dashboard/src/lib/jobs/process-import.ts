@@ -1,12 +1,12 @@
 import 'server-only';
 
-import { randomUUID } from 'node:crypto';
-import type { NormalizedJob } from '@job-app/core';
-import { jobs, job_scores } from '@job-app/db/schema';
+import { jobs } from '@job-app/db/schema';
 import {
   ingestJob,
   enrichGovernmentSalary,
   GovernmentSalaryReferenceSchema,
+  persistedJobToNormalized,
+  persistIngestionResults,
   toJobImportResult,
   type ApiError,
   type ConfirmScoreRequest,
@@ -16,64 +16,7 @@ import {
 import { getDatabase } from '@/lib/db';
 import { getVerifiedSkills } from '@/lib/verified-skills';
 
-function parseStringArray(value: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function toNormalizedForDedupe(row: typeof jobs.$inferSelect): NormalizedJob {
-  return {
-    id: row.id,
-    source_id: row.source_id,
-    source_name: row.source_name,
-    source_job_id: row.source_job_id,
-    original_url: row.original_url,
-    title: row.title,
-    company: row.company,
-    description: row.description,
-    date_posted: row.date_posted || null,
-    date_expires: row.date_expires || null,
-    date_ingested: row.date_ingested,
-    country: row.country,
-    city: row.city,
-    region: row.region,
-    work_setup: row.work_setup as NormalizedJob['work_setup'],
-    work_setup_confidence: row.work_setup_confidence,
-    work_setup_evidence: null,
-    onsite_days_per_week: null,
-    relocation_required: null,
-    allowed_countries: [],
-    allowed_regions: [],
-    eligibility_text: null,
-    employment_type: row.employment_type as NormalizedJob['employment_type'],
-    contract_type: null,
-    schedule: null,
-    timezone_overlap: null,
-    salary_min: row.salary_min,
-    salary_max: row.salary_max,
-    salary_currency: row.salary_currency,
-    salary_period: row.salary_period as NormalizedJob['salary_period'],
-    seniority: row.seniority as NormalizedJob['seniority'],
-    years_experience_min: row.years_experience_min,
-    years_experience_max: null,
-    required_skills: parseStringArray(row.required_skills),
-    preferred_skills: parseStringArray(row.preferred_skills),
-    required_education: null,
-    required_licenses: [],
-    application_url: null,
-    application_method: null,
-    has_sensitive_questions: null,
-    category: (row.category as NormalizedJob['category']) ?? null,
-    eligibility_status:
-      (row.eligibility_status as NormalizedJob['eligibility_status']) ?? null,
-    status: row.status as NormalizedJob['status'],
-    raw_snapshot: row.raw_snapshot,
-  };
-}
+export const toNormalizedForDedupe = persistedJobToNormalized;
 
 function appendUniqueSection(
   description: string,
@@ -237,77 +180,39 @@ export async function processAndPersistImportedJob(
     },
   });
 
-  await db.insert(jobs).values({
-    id: jobId,
-    source_id: normalized.source_id,
-    source_name: normalized.source_name,
-    source_job_id: normalized.source_job_id ?? jobId,
-    original_url: normalized.original_url,
-    title: normalized.title,
-    company: normalized.company,
-    description: normalized.description,
-    // The legacy SQLite schema is NOT NULL for dates. Empty string preserves
-    // "unknown" without inventing a date until that schema is migrated.
-    date_posted: normalized.date_posted ?? '',
-    date_expires: data.closing_date ?? normalized.date_expires ?? '',
-    date_ingested: normalized.date_ingested,
-    country: normalized.country,
-    city: normalized.city,
-    region: normalized.region,
-    work_setup: normalized.work_setup,
-    work_setup_confidence: normalized.work_setup_confidence,
-    employment_type: normalized.employment_type,
-    seniority: normalized.seniority,
-    salary_min: normalized.salary_min,
-    salary_max: normalized.salary_max,
-    salary_currency: normalized.salary_currency,
-    salary_period: normalized.salary_period,
-    salary_grade: data.salary_grade ?? null,
-    salary_step: data.salary_step ?? null,
-    salary_reference_min: salaryReference.salaryReferenceMin,
-    salary_reference_max: salaryReference.salaryReferenceMax,
-    salary_reference_currency: salaryReference.salaryReferenceCurrency,
-    salary_reference_period: salaryReference.salaryReferencePeriod,
-    salary_reference_schedule_year:
-      salaryReference.salaryReferenceScheduleYear,
-    salary_reference_source: salaryReference.salaryReferenceSource,
-    salary_is_reference_only: salaryReference.salaryIsReferenceOnly,
-    compensation_note: salaryReference.compensationNote,
-    vacancies: data.vacancies ?? null,
-    application_email: data.application_email?.trim() || null,
-    application_addressee: data.application_addressee?.trim() || null,
-    civil_service_eligibility:
-      data.civil_service_eligibility?.trim() || null,
-    schedule_notes: JSON.stringify(data.schedule_notes),
-    government_scope: data.government_scope ?? null,
-    years_experience_min: normalized.years_experience_min,
-    required_skills: JSON.stringify(normalized.required_skills),
-    preferred_skills: JSON.stringify(normalized.preferred_skills),
-    category: normalized.category,
-    eligibility_status: normalized.eligibility_status,
-    status:
-      result.status === 'HARD_REJECTED'
-        ? 'HARD_REJECTED'
-        : 'SCORING_COMPLETED',
-    rejection_reasons:
-      actualReasons.length > 0 ? JSON.stringify(actualReasons) : null,
-    raw_snapshot: snapshot,
-  });
-
-  if (result.score_detail) {
-    const score = result.score_detail;
-    await db.insert(job_scores).values({
-      id: randomUUID(),
-      job_id: jobId,
-      score: score.score,
-      factors: JSON.stringify(score.factors),
-      recommendation: score.recommendation,
-      matched_skills: JSON.stringify(score.matched_verified_skills),
-      missing_skills: JSON.stringify(score.missing_required_skills),
-      risk_flags: JSON.stringify(score.risk_flags),
-      reason: score.reason,
-    });
-  }
+  persistIngestionResults(db, [
+    {
+      result,
+      metadata: {
+        persistedStatus:
+          result.status === 'HARD_REJECTED'
+            ? 'HARD_REJECTED'
+            : 'SCORING_COMPLETED',
+        rawSnapshot: snapshot,
+        dateExpires: data.closing_date ?? normalized.date_expires,
+        salaryGrade: data.salary_grade ?? null,
+        salaryStep: data.salary_step ?? null,
+        salaryReferenceMin: salaryReference.salaryReferenceMin,
+        salaryReferenceMax: salaryReference.salaryReferenceMax,
+        salaryReferenceCurrency:
+          salaryReference.salaryReferenceCurrency,
+        salaryReferencePeriod: salaryReference.salaryReferencePeriod,
+        salaryReferenceScheduleYear:
+          salaryReference.salaryReferenceScheduleYear,
+        salaryReferenceSource: salaryReference.salaryReferenceSource,
+        salaryIsReferenceOnly: salaryReference.salaryIsReferenceOnly,
+        compensationNote: salaryReference.compensationNote,
+        vacancies: data.vacancies ?? null,
+        applicationEmail: data.application_email?.trim() || null,
+        applicationAddressee:
+          data.application_addressee?.trim() || null,
+        civilServiceEligibility:
+          data.civil_service_eligibility?.trim() || null,
+        scheduleNotes: data.schedule_notes,
+        governmentScope: data.government_scope ?? null,
+      },
+    },
+  ]);
 
   return toJobImportResult({
     status: result.status,

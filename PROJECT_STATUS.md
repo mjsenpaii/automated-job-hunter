@@ -1,9 +1,47 @@
 # Project Status
 
 **Last updated:** 2026-07-28 PHT
-**Current phase:** Gemini hybrid importer + deterministic Philippine government salary-grade enrichment (final hardening complete, uncommitted)
-**Overall health:** 🟢 232/232 tests passing (26 files) · 6/6 workspace builds passing · dashboard production build and strict TypeScript passing
-**Active branch:** `master` (local changes pending commit approval)
+**Current phase:** Phase 7.1A — reusable public-job discovery + Arbeitnow manual dry run (implemented locally, uncommitted)
+**Overall health:** 🟢 253/253 tests passing (28 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
+**Active branch:** `master` at pushed baseline `ee3bf0d` (Phase 7.1A local changes uncommitted)
+
+---
+
+## Session — Phase 7.1A Public Job Discovery
+
+Implemented a reusable, dry-run-first discovery layer and an official Arbeitnow public API adapter.
+No Trigger.dev task, schedule, Gemini extraction, browser automation, application package, message,
+or submission behavior was added.
+
+- Added a common `DiscoveredJob` contract, deterministic `RawJobInput` mapper, local filtering,
+  batch-local/existing-record deduplication, structured run summaries, and an injectable repository.
+- Added a fixed-host Arbeitnow adapter with a descriptive User-Agent, ten-second timeout,
+  envelope/per-record Zod validation, safe pagination, HTML cleaning, three-page ceiling, and
+  50-job ceiling. Linked employer pages are never fetched.
+- Added `pnpm discovery:arbeitnow` with `--limit`, `--pages`, `--remote-only`, `--query`, `--apply`,
+  and `--help`. Dry-run is the default and opens the existing SQLite database read-only.
+- Extracted shared atomic job/score persistence from the dashboard import path. Both manual import
+  and discovery now reuse it; a complete discovery batch is processed before one transaction.
+- The repository has no `AWAITING_REVIEW` state. Successfully scored discoveries use the existing
+  `DISCOVERED` state, which the dashboard already presents as requiring review. Hard rejections
+  remain `HARD_REJECTED`; no `applications` rows are created.
+- Source tags, location, remote flag, job types, published timestamp, stable slug, and canonical URL
+  are mapped deterministically. Salary, country eligibility, closing dates, and missing facts remain
+  unknown.
+- Added 21 mocked tests covering mapping, cleaning, optional values, stable identity, pagination and
+  job limits, timeout/error/schema handling, filters, dry-run immutability, in-memory apply,
+  idempotency, existing hard-rejection/scoring reuse, no applications, no Gemini dependency, and
+  safe CLI output. Total: 253/253 tests across 28 files.
+- The required live dry run fetched ten records from one official Arbeitnow API page. Eight were
+  excluded by `--remote-only`; the existing pipeline classified the remaining two as one
+  `HARD_REJECTED` job and one scored `DISCOVERED` job. It reported two jobs that would be persisted
+  and persisted zero.
+- Before and after that dry run, SQLite contained one existing job and one score row (all other
+  application/activity tables were empty). The database, WAL, and shared-memory file hashes,
+  lengths, and timestamps were identical, confirming that dry-run mode made no database changes.
+- Final verification passes: 253/253 tests, workspace build 6/6, standalone dashboard production
+  build, dashboard strict TypeScript, and `git diff --check`.
+- Trigger.dev scheduling remains deferred to Phase 7.1B.
 
 ---
 
@@ -116,7 +154,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | ⬜ NOT STARTED | Trigger.dev orchestration |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A manual Arbeitnow discovery implemented; Trigger.dev scheduling deferred to 7.1B |
 
 ---
 
@@ -129,7 +167,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 25 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
 | `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
-| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, manual + **URL-import adapter (SSRF-hardened)** | 96 ✅ |
+| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, manual + **URL-import adapter (SSRF-hardened)** | 117 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
 | `@job-app/dashboard` | Next.js productivity UI + hybrid Gemini importer + `ingestJob`-backed confirmation | 51 ✅ + build/runtime green |
 
@@ -148,6 +186,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `5540f9f` | Phase 4-5 — DOCX resumes + application packages | 90 |
 | `b003fb8` | wip: preserve AGY URL importer and validation work | 114 |
 | `ea3b565` | feat: complete job URL importer and automated scoring validation | 141 |
+| `ee3bf0d` | feat: add Gemini job importer and government salary enrichment | 232 |
 | _(pending)_ | fix: dashboard build & runtime (workspace packages, DB, API routes) | 141 |
 
 ---

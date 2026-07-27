@@ -19,6 +19,13 @@ function source(relative: string): string {
   return readFileSync(path.resolve(__dirname, '..', relative), 'utf8');
 }
 
+function repositorySource(relative: string): string {
+  return readFileSync(
+    path.resolve(__dirname, '../../..', relative),
+    'utf8',
+  );
+}
+
 function allFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {
     const full = path.join(directory, entry);
@@ -198,8 +205,12 @@ describe('unified importer UI behavior', () => {
     );
     expect(detail).toContain('No replacement reason has been inferred.');
     const persistence = source('src/lib/jobs/process-import.ts');
-    expect(persistence).toContain('rejection_reasons:');
-    expect(persistence).toContain('JSON.stringify(actualReasons)');
+    expect(persistence).toContain('persistIngestionResults(db');
+    const sharedPersistence = repositorySource(
+      'packages/ingestion/src/persistence.ts',
+    );
+    expect(sharedPersistence).toContain('rejection_reasons:');
+    expect(sharedPersistence).toContain('JSON.stringify(rejectionReasons)');
     const detailPage = source('src/app/jobs/[id]/page.tsx');
     expect(detailPage).toContain('checkHardReject(normalized');
     expect(detailPage).toContain(

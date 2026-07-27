@@ -1,22 +1,33 @@
 # Next Actions
 
 **Last updated:** 2026-07-28 PHT
-**Current state:** Gemini hybrid importer, professional dashboard redesign, job export, and deterministic Philippine national-government salary-grade enrichment are hardened locally for review. The local jobs database was explicitly cleared on 2026-07-28 and currently contains zero jobs. 232/232 tests pass across 26 files. No commit or push has been made.
+**Current state:** Phase 7.1A Arbeitnow public-job discovery is implemented locally on top of the pushed Gemini importer/government-enrichment baseline. The CLI is dry-run by default, uses the existing deterministic pipeline, and persists successful discoveries as `DISCOVERED` only with explicit `--apply`. The required live dry run fetched ten records and persisted none; SQLite was byte-for-byte unchanged. Final verification passes with 253/253 tests across 28 files, workspace build 6/6, dashboard production build, and strict TypeScript. The Phase 7.1A changes are uncommitted and unpushed.
 
 ---
 
 ## Review this implementation
 
-1. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
+1. Review the Phase 7.1A architecture and source-compliance notes in
+   `docs/PUBLIC_JOB_DISCOVERY.md` and `docs/SOURCE_COMPLIANCE.md`.
+2. Run a safe manual dry run:
+
+   ```powershell
+   pnpm discovery:arbeitnow -- --limit 10 --pages 1 --remote-only
+   ```
+
+3. Do not use `--apply` until the source mapping and real dry-run preview are approved.
+4. Keep Trigger.dev scheduling deferred to Phase 7.1B; its future task must call the reusable
+   discovery runner rather than duplicate source or pipeline logic.
+5. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
    detail pages.
-2. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
+6. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
    to a `NEXT_PUBLIC_*` variable. Optional model overrides are `GEMINI_PRIMARY_MODEL` and
    `GEMINI_FALLBACK_MODEL`. An existing `GEMINI_MODEL` is supported only as a legacy fallback
    override.
-3. If a development server is already using `apps/dashboard/.next`, stop it before running
+7. If a development server is already using `apps/dashboard/.next`, stop it before running
    `pnpm build`; concurrent Next dev/build processes can contend for the same output directory.
-4. If the implementation is accepted, create a commit only after explicit user approval.
-5. Review the PSA Salary Grade 6 import and its explicit “reference only” treatment. The committed
+8. If the implementation is accepted, create a commit only after explicit user approval.
+9. Review the PSA Salary Grade 6 import and its explicit “reference only” treatment. The committed
    2026 DBM schedule and enrichment rules are documented in
    `docs/GOVERNMENT_SALARY_ENRICHMENT.md`.
 
@@ -40,6 +51,13 @@
 - Existing saved rows are not automatically rewritten. The explicit
   `pnpm --filter @job-app/ingestion backfill:government` utility defaults to dry-run; use
   `-- --apply` only after reviewing its counts. Apply mode was not run in this session.
+- Arbeitnow currently provides one structured source. It does not establish whether a remote
+  European job accepts Philippine applicants, so the deterministic pipeline correctly leaves
+  ambiguous eligibility as `REQUIRES_REVIEW`.
+- Arbeitnow source tags are preserved as source-provided job skills/categories; the adapter does
+  not infer additional skills, salary, country eligibility, dates, or experience requirements.
+- Discovery is manual only. Trigger.dev scheduling, retries across task runs, and run monitoring
+  remain Phase 7.1B work.
 
 ---
 
@@ -148,5 +166,6 @@ Resolution summary:
 
 - **Phase 6 — Browser Assistance** (Playwright) — NOT STARTED.
 - **Phase 7 — Limited Automation** (Trigger.dev) — NOT STARTED.
+- **Phase 7.1B — Trigger.dev scheduling** — DEFERRED until manual Arbeitnow discovery is approved.
 - Additional source adapters (Gmail alerts, RSS/Atom).
 - Answer remaining candidate questions (Q6–Q12: salary, location, schedule, equipment, English level).

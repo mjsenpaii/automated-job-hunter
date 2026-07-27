@@ -69,12 +69,11 @@ export async function ingestJob(raw: RawJobInput, existingJobs: NormalizedJob[],
       normalized_job: normalized,
       score_detail: scoreResult
     };
-  } catch (error: unknown) {
-    console.error("Pipeline Error:", error);
+  } catch {
     return {
       job_id: '',
       status: 'ERROR',
-      error: error instanceof Error ? error.message : 'Unknown ingestion error',
+      error: 'The job could not be processed by the deterministic pipeline.',
     };
   }
 }
