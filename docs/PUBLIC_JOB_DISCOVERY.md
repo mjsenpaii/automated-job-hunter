@@ -219,6 +219,65 @@ before shortlist, resume generation, or any future application action.
 
 ## Future Phase 7.1B
 
-Trigger.dev scheduling is intentionally deferred. A future task should call
-these same adapters and the discovery runner rather than duplicating source,
-pipeline, or persistence logic.
+Phase 7.1B.1 adds a manual Trigger.dev development task that orchestrates the
+existing Arbeitnow, Remotive, and Lever discovery adapters through the shared
+discovery runner. It is dry-run only, opens the local SQLite database read-only
+for deduplication, and never creates applications or submissions.
+
+### Trigger.dev manual development orchestration
+
+Task id: `public-job-discovery-dry-run`
+
+The task lives in `src/trigger/public-job-discovery-dry-run.ts` and calls the
+shared orchestration entry point in
+`packages/ingestion/src/discovery/orchestration.ts`. It reuses the existing
+adapters, filters, scoring, deduplication, and summary contracts. It does not
+spawn shell commands, duplicate discovery logic, or write to SQLite.
+
+Payload defaults:
+
+- all three sources enabled
+- `query`: `developer`
+- `remoteOnly`: `true`
+- Arbeitnow and Remotive limits: `50`
+- Lever limit: `50`
+- Lever companies: `spotify`, `highspot`, `aleph`
+
+Unknown payload properties, arbitrary Lever hosts/URLs, unknown Lever companies,
+and out-of-range limits are rejected with Zod validation.
+
+Manual development runs require the Trigger.dev dev CLI to remain running:
+
+```powershell
+pnpm build
+pnpm trigger:dev
+```
+
+Dry-run orchestration copies `data/app.db` and any existing WAL/SHM sidecars into a
+temporary read-only snapshot before opening SQLite. This prevents Trigger.dev task
+runs from creating or mutating the original database files while still allowing
+deduplication against current saved jobs.
+
+Then trigger `public-job-discovery-dry-run` from the Trigger.dev dashboard or
+another authenticated Trigger.dev client. Do not use `--apply` or any
+persistence option from this task. The task always returns:
+
+- `mode: DRY_RUN`
+- per-source structured summaries with at most five preview jobs and no
+  descriptions
+- combined totals
+- `persistenceEnabled: false`
+- `applicationsCreated: 0`
+- `submissionsCreated: 0`
+
+Retry and concurrency settings are conservative: two attempts maximum, short
+exponential backoff, queue concurrency limit of one, and a TTL that prevents
+stale queued discovery runs. Deterministic validation errors are not retried.
+
+No cron schedule, dashboard schedule, or recurring trigger is attached yet.
+Phase 7.1B.2 will add cron scheduling only after manual approval.
+
+Trigger.dev scheduling for unattended production runs remains deferred until
+Phase 7.1B.2. A future scheduled task should continue calling these same
+adapters and the discovery runner rather than duplicating source, pipeline, or
+persistence logic.

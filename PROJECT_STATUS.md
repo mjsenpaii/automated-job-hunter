@@ -1,9 +1,53 @@
 # Project Status
 
 **Last updated:** 2026-07-28 PHT
-**Current phase:** Phase 7.1A.3 — Lever public company-board discovery (implemented locally, uncommitted)
-**Overall health:** 🟢 296/296 tests passing (32 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
-**Active branch:** `master` at pushed baseline `4450073` (Phase 7.1A.3 local changes uncommitted)
+**Current phase:** Phase 7.1B.1 — Trigger.dev manual public-job discovery orchestration (implemented locally, uncommitted)
+**Overall health:** 🟢 312/312 tests passing (33 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
+**Active branch:** `master` at pushed baseline `71424dc` (Phase 7.1B.1 local changes uncommitted)
+
+---
+
+## Session — Phase 7.1B.1 Trigger.dev Manual Public-Job Discovery Orchestration
+
+Added a manual Trigger.dev development task that orchestrates the committed
+Arbeitnow, Remotive, and Lever discovery adapters through the shared discovery
+runner. No cron schedule, Gemini extraction, browser automation, application
+package, message, submission, or SQLite write behavior was added.
+
+- Added `public-job-discovery-dry-run` in `src/trigger/public-job-discovery-dry-run.ts`
+  with conservative retry, queue concurrency limit 1, TTL, and validation-error
+  no-retry handling.
+- Added shared orchestration in
+  `packages/ingestion/src/discovery/orchestration.ts` plus extracted runtime and
+  Lever company-selection helpers reused by the existing CLIs.
+- The task accepts a strict Zod payload with per-source enable flags, query,
+  remote-only filtering, per-source limits, and configured Lever companies only.
+- Execution runs enabled sources sequentially, uses dry-run options only, opens
+  local SQLite read-only for deduplication, catches per-source failures safely,
+  and returns combined totals with at most five preview jobs per source and no
+  descriptions.
+- Added mocked orchestration tests covering defaults, validation, unknown Lever
+  companies, sequential invocation, disabled sources, partial failure, combined
+  totals, no persistence, no applications, safe output, no shell execution, no
+  Gemini dependency, no cron attachment, and existing per-source limits.
+- Documentation updated in `docs/PUBLIC_JOB_DISCOVERY.md`, `PROJECT_STATUS.md`,
+  and `NEXT_ACTIONS.md`.
+- Final verification passes: 311/311 tests, workspace build 6/6, standalone
+  dashboard production build, dashboard strict TypeScript, and
+  `git diff --check`.
+- One manual Trigger.dev live dry run completed successfully as run
+  `run_06fqhiridn3vvgm33oj7261n01` with default payload (`query: developer`,
+  `remoteOnly: true`, all three sources enabled). Combined totals: 136 fetched,
+  128 excluded by filters, 8 jobs that would be persisted, 0 persisted.
+- Focused SQLite immutability verification confirmed the task does not modify
+  original `app.db`, `app.db-wal`, or `app.db-shm` after the orchestration
+  layer was updated to copy the database into a temporary read-only snapshot.
+  An earlier inconclusive result was caused by unsafe `sqlite3 data/app.db`
+  verification (possible WAL checkpoint) and by the pre-fix task opening the
+  original files directly, which created empty WAL/SHM sidecars.
+- SQLite row counts remained unchanged before and after the verified run (1
+  job, 1 score, 0 applications, 0 activity).
+- Cron scheduling remains deferred to Phase 7.1B.2.
 
 ---
 
@@ -254,7 +298,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever manual discovery implemented; Trigger.dev scheduling deferred to 7.1B |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever manual discovery committed; 7.1B.1 manual Trigger.dev orchestration implemented locally; cron scheduling deferred to 7.1B.2 |
 
 ---
 

@@ -8,6 +8,9 @@ export default defineConfig({
   // You can override this on an individual task.
   // See https://trigger.dev/docs/runs/max-duration
   maxDuration: 3600,
+  build: {
+    external: ["better-sqlite3"],
+  },
   retries: {
     enabledInDev: true,
     default: {

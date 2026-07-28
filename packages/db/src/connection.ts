@@ -31,6 +31,25 @@ export function getReadonlyDb(
   return drizzle(sqlite, { schema });
 }
 
+export function openReadonlyDatabaseSession(
+  dbPath: string,
+): {
+  database: BetterSQLite3Database<typeof schema>;
+  close(): void;
+} {
+  const sqlite = new Database(dbPath, {
+    readonly: true,
+    fileMustExist: true,
+  });
+  sqlite.pragma('query_only = ON');
+  return {
+    database: drizzle(sqlite, { schema }),
+    close() {
+      sqlite.close();
+    },
+  };
+}
+
 /**
  * Idempotently creates the tables/indexes the app needs (local-first SQLite).
  *

@@ -1,9 +1,4 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { SkillEntry } from '@job-app/core';
-import { getDb, getReadonlyDb } from '@job-app/db/connection';
-import { z } from 'zod';
 import {
   ArbeitnowAdapter,
   ArbeitnowDiscoveryError,
@@ -23,25 +18,19 @@ import {
   type DiscoveryRunSummary,
   type DiscoverySourceAdapter,
 } from './contracts.js';
-import { createDiscoveryRepository } from './repository.js';
-import { runDiscovery } from './runner.js';
 import {
   LEVER_COMPANIES,
   type LeverCompany,
 } from './lever-companies.v1.js';
-
-const REPOSITORY_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../..',
-);
-
-const RawVerifiedSkillSchema = z.object({
-  skill: z.string().trim().min(1),
-  verification_status: z.string(),
-  source: z.string(),
-  source_reference: z.string().nullable(),
-  allowed_in_resume: z.boolean(),
-});
+import { LeverCompanySelectionError, resolveLeverCompanies } from './lever-selection.js';
+import {
+  createDiscoveryRepositoryForRun,
+  defaultDatabasePath,
+  defaultSkillsPath,
+  loadVerifiedSkills,
+  resolveDiscoveryRepositoryRoot,
+} from './runtime.js';
+import { runDiscovery } from './runner.js';
 
 export class DiscoveryCliError extends Error {
   constructor(message: string) {
@@ -328,44 +317,31 @@ export function parseLeverCliArgs(
     );
   }
 
-  const companies = allCompanies
-    ? configuredCompanies.filter((company) => company.enabled)
-    : requestedCompanies.map((requested) => {
-        if (/^https?:\/\//i.test(requested)) {
-          throw new DiscoveryCliError(
-            'Lever company selection does not accept URLs or arbitrary hosts.',
-          );
-        }
-        const normalized = requested.trim().toLocaleLowerCase();
-        const company = configuredCompanies.find(
-          (configured) =>
-            configured.site.toLocaleLowerCase() === normalized ||
-            configured.displayName.toLocaleLowerCase() === normalized,
-        );
-        if (!company || !company.enabled) {
-          throw new DiscoveryCliError(
-            `Unknown or disabled Lever company: ${requested}`,
-          );
-        }
-        return company;
-      });
-  const uniqueCompanies = [
-    ...new Map(
-      companies.map((company) => [
-        company.site.toLocaleLowerCase(),
-        company,
-      ]),
-    ).values(),
-  ];
+  let uniqueCompanies: LeverCompany[] = [];
+  if (allCompanies) {
+    uniqueCompanies = configuredCompanies.filter((company) => company.enabled);
+    if (uniqueCompanies.length > 10) {
+      throw new DiscoveryCliError(
+        'A Lever discovery run supports at most ten companies.',
+      );
+    }
+  } else if (requestedCompanies.length > 0) {
+    try {
+      uniqueCompanies = resolveLeverCompanies(
+        requestedCompanies,
+        configuredCompanies,
+      );
+    } catch (error) {
+      if (error instanceof LeverCompanySelectionError) {
+        throw new DiscoveryCliError(error.message);
+      }
+      throw error;
+    }
+  }
 
   if (!help && !listCompanies && uniqueCompanies.length === 0) {
     throw new DiscoveryCliError(
       'Select at least one company with --company or use --all-companies.',
-    );
-  }
-  if (uniqueCompanies.length > 10) {
-    throw new DiscoveryCliError(
-      'A Lever discovery run supports at most ten companies.',
     );
   }
 
@@ -393,55 +369,6 @@ export function formatLeverCompanyList(
     );
   }
   return lines.join('\n');
-}
-
-function loadVerifiedSkills(filePath: string): SkillEntry[] {
-  let json: unknown;
-  try {
-    json = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    throw new DiscoveryCliError(
-      'Unable to read the verified-skills source required for scoring.',
-    );
-  }
-  const parsed = RawVerifiedSkillSchema.array().safeParse(json);
-  if (!parsed.success) {
-    throw new DiscoveryCliError(
-      'The verified-skills source has an unexpected shape.',
-    );
-  }
-  return parsed.data.map(
-    (entry): SkillEntry => ({
-      name: entry.skill,
-      category: 'other',
-      proficiency: null,
-      verification_status: 'VERIFIED',
-      source: 'CV_MJ.docx',
-      source_reference: entry.source_reference,
-      evidence_level: 'training',
-      allowed_in_resume: entry.allowed_in_resume,
-    }),
-  );
-}
-
-function repositoryForRun(
-  options: DiscoveryOptions,
-  databasePath: string,
-): DiscoveryRepository {
-  if (options.apply) {
-    return createDiscoveryRepository(getDb(databasePath));
-  }
-  if (!fs.existsSync(databasePath)) {
-    return {
-      async loadExistingJobs() {
-        return [];
-      },
-      async persistBatch() {
-        throw new Error('Dry-run repository cannot persist jobs.');
-      },
-    };
-  }
-  return createDiscoveryRepository(getReadonlyDb(databasePath));
 }
 
 export function formatDiscoverySummary(
@@ -486,15 +413,37 @@ async function executeDiscoveryCli(
 ): Promise<DiscoveryRunSummary> {
   const databasePath =
     dependencies.databasePath ??
-    path.join(REPOSITORY_ROOT, 'data', 'app.db');
+    defaultDatabasePath(resolveDiscoveryRepositoryRoot());
   const skillsPath =
     dependencies.skillsPath ??
-    path.join(REPOSITORY_ROOT, 'candidate', 'skills.verified.json');
-  const repository =
-    dependencies.repository ??
-    repositoryForRun(parsed.options, databasePath);
-  const verifiedSkills =
-    dependencies.verifiedSkills ?? loadVerifiedSkills(skillsPath);
+    defaultSkillsPath(resolveDiscoveryRepositoryRoot());
+  let repository = dependencies.repository;
+  let verifiedSkills = dependencies.verifiedSkills;
+  if (!repository) {
+    try {
+      repository = createDiscoveryRepositoryForRun(
+        parsed.options,
+        databasePath,
+      );
+    } catch (error) {
+      throw new DiscoveryCliError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to prepare the discovery repository.',
+      );
+    }
+  }
+  if (!verifiedSkills) {
+    try {
+      verifiedSkills = loadVerifiedSkills(skillsPath);
+    } catch (error) {
+      throw new DiscoveryCliError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to read the verified-skills source required for scoring.',
+      );
+    }
+  }
   const summary = await runDiscovery(parsed.options, {
     adapter,
     repository,

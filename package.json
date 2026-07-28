@@ -12,7 +12,12 @@
     "discovery:arbeitnow": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:arbeitnow",
     "discovery:remotive": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:remotive",
     "discovery:lever": "pnpm --filter @job-app/ingestion build && pnpm --filter @job-app/ingestion discovery:lever",
+    "trigger:dev": "pnpm build && npx trigger.dev@4.5.7 dev",
     "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "dependencies": {
+    "@job-app/ingestion": "workspace:*",
+    "better-sqlite3": "12.11.1"
   },
   "devDependencies": {
     "@trigger.dev/build": "4.5.7",

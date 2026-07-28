@@ -25,6 +25,10 @@
     "./discovery": {
       "types": "./dist/discovery/contracts.d.ts",
       "default": "./dist/discovery/contracts.js"
+    },
+    "./discovery/orchestration": {
+      "types": "./dist/discovery/orchestration.d.ts",
+      "default": "./dist/discovery/orchestration.js"
     }
   },
   "scripts": {
