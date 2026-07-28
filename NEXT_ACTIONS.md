@@ -1,7 +1,7 @@
 # Next Actions
 
 **Last updated:** 2026-07-28 PHT
-**Current state:** Phase 7.1B.1 adds a manual Trigger.dev public-job discovery orchestration task on top of the committed Arbeitnow, Remotive, and Lever discovery core. The task is dry-run only, opens local SQLite read-only for deduplication, and does not create applications or submissions. One manual live dry run completed successfully. No cron schedule or `--apply` path is attached yet.
+**Current state:** Phase 7.1B.2 adds development-only declarative Trigger.dev cron schedules for public-job discovery on top of the committed manual orchestration core. Morning (8:00 AM) and evening (7:00 PM) schedules run in `Asia/Manila`, `DEVELOPMENT` only, dry-run only, with temporary SQLite snapshot reads and no persistence/applications/submissions.
 
 ---
 
@@ -12,14 +12,18 @@
 2. Review the Phase 7.1B.1 manual Trigger.dev orchestration task in
    `src/trigger/public-job-discovery-dry-run.ts` and
    `packages/ingestion/src/discovery/orchestration.ts`.
-3. Keep the Trigger.dev dev CLI running for manual development runs:
+3. Review Phase 7.1B.2 development schedules in
+   `src/trigger/public-job-discovery-scheduled-dry-runs.ts` and shared helpers
+   in `src/trigger/public-job-discovery-shared.ts`.
+4. Keep the Trigger.dev dev CLI running and PC powered on for development
+   schedule execution:
 
    ```powershell
    pnpm build
    pnpm trigger:dev
    ```
 
-4. Run either safe manual dry run:
+5. Run either safe manual dry run:
 
    ```powershell
    pnpm discovery:arbeitnow -- --limit 10 --pages 1 --remote-only
@@ -28,10 +32,10 @@
    pnpm discovery:lever -- --company spotify --company highspot --company aleph --remote-only --query "developer" --limit 50
    ```
 
-5. Do not use any source's `--apply` or the Trigger.dev task's persistence path
+6. Do not use any source's `--apply` or the Trigger.dev task's persistence path
    until mapping and real dry-run preview are approved.
-6. Do not add cron scheduling until Phase 7.1B.2 after manual approval of the
-   orchestration task.
+7. Do not enable scheduled persistence yet. Next step after schedule stability
+   review is controlled scheduled persistence with explicit approval.
 5. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
    detail pages.
 6. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
@@ -58,9 +62,9 @@
   Retry-After-aware wait; there is no third request or fallback loop.
 - Authenticated pages should be pasted manually; login, CAPTCHA handling, browser automation, and
   automatic application submission remain intentionally out of scope.
-- Trigger.dev manual orchestration is available in development only. Cron
-  scheduling, retries across unattended runs, and run monitoring remain Phase
-  7.1B.2 work.
+- Trigger.dev cron scheduling is development-only in Phase 7.1B.2. Local
+  schedules run only while `pnpm trigger:dev` is active and the PC remains
+  running.
 - Government salary enrichment currently supports only the verified 2026 DBM national-government
   schedule. Unsupported years, local-government roles, private employers, and unclear government
   coverage intentionally receive no reference range.
@@ -86,9 +90,8 @@
   evidence, dates, sections, stable posting ID, and canonical hosted URL.
   Salary, skills, experience, closing date, and country eligibility remain
   unknown.
-- Discovery is manual only. Trigger.dev development orchestration is available,
-  but cron scheduling, retries across unattended runs, and run monitoring remain
-  Phase 7.1B.2 work.
+- Discovery is still dry-run-only. Scheduled persistence, unattended apply
+  behavior, and any application automation remain deferred.
 
 ---
 
@@ -198,7 +201,7 @@ Resolution summary:
 - **Phase 6 — Browser Assistance** (Playwright) — NOT STARTED.
 - **Phase 7 — Limited Automation** (Trigger.dev) — 🟨 IN PROGRESS.
 - **Phase 7.1B.1 — Trigger.dev manual orchestration** — IMPLEMENTED locally.
-- **Phase 7.1B.2 — Trigger.dev cron scheduling** — DEFERRED until manual
-  orchestration is approved.
+- **Phase 7.1B.2 — Trigger.dev cron scheduling** — IMPLEMENTED locally for
+  development-only dry runs.
 - Additional source adapters (Gmail alerts, RSS/Atom).
 - Answer remaining candidate questions (Q6–Q12: salary, location, schedule, equipment, English level).

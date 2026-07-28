@@ -8,12 +8,14 @@ import {
   PublicJobDiscoveryValidationError,
   runPublicJobDiscoveryDryRun,
 } from "@job-app/ingestion/discovery/orchestration";
+import {
+  publicJobDiscoveryQueue,
+  shouldSkipDiscoveryRetry,
+} from "./public-job-discovery-shared";
 
 export const publicJobDiscoveryDryRunTask = task({
   id: "public-job-discovery-dry-run",
-  queue: {
-    concurrencyLimit: 1,
-  },
+  queue: publicJobDiscoveryQueue,
   retry: {
     maxAttempts: 2,
     factor: 2,
@@ -24,10 +26,7 @@ export const publicJobDiscoveryDryRunTask = task({
   ttl: "30m",
   maxDuration: 600,
   catchError: async ({ error }) => {
-    if (
-      error instanceof PublicJobDiscoveryValidationError ||
-      error instanceof AbortTaskRunError
-    ) {
+    if (shouldSkipDiscoveryRetry(error)) {
       return { skipRetrying: true };
     }
     return {};

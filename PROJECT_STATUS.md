@@ -1,9 +1,9 @@
 # Project Status
 
 **Last updated:** 2026-07-28 PHT
-**Current phase:** Phase 7.1B.1 — Trigger.dev manual public-job discovery orchestration (implemented locally, uncommitted)
-**Overall health:** 🟢 312/312 tests passing (33 files) · workspace build 6/6 · dashboard production build and strict TypeScript passing
-**Active branch:** `master` at pushed baseline `71424dc` (Phase 7.1B.1 local changes uncommitted)
+**Current phase:** Phase 7.1B.2 — Trigger.dev development cron scheduling (implemented locally, uncommitted)
+**Overall health:** 🟢 verification in progress for schedules
+**Active branch:** `master` at pushed baseline `d5b38ea` (Phase 7.1B.2 local changes uncommitted)
 
 ---
 
@@ -48,6 +48,31 @@ package, message, submission, or SQLite write behavior was added.
 - SQLite row counts remained unchanged before and after the verified run (1
   job, 1 score, 0 applications, 0 activity).
 - Cron scheduling remains deferred to Phase 7.1B.2.
+
+---
+
+## Session — Phase 7.1B.2 Trigger.dev Development Cron Scheduling
+
+Added two development-only declarative schedules for public-job discovery while
+keeping the manual task intact.
+
+- Added `public-job-discovery-morning-dry-run` at `0 8 * * *` and
+  `public-job-discovery-evening-dry-run` at `0 19 * * *`, both in
+  `Asia/Manila` and `["DEVELOPMENT"]` only.
+- Both scheduled tasks call one shared helper that invokes
+  `runPublicJobDiscoveryDryRun()` with a fixed dry-run payload:
+  `developer` query, remote-only, source limits 50/50/50, and Lever companies
+  `spotify`, `highspot`, `aleph`.
+- Shared queue concurrency was preserved across manual + scheduled discovery via
+  one queue (`concurrencyLimit: 1`), with max attempts 2 and TTL `30m`.
+- Dry-run safety remains unchanged: temporary SQLite snapshot reads only, no
+  persistence, no applications/submissions, no Gemini, no shell spawning, and
+  safe logs without full descriptions.
+- Added mocked schedule-focused tests for cron/timezone/environment boundaries,
+  shared helper usage, queue/retry/TTL constraints, no imperative scheduling,
+  and safety guards.
+- Trigger.dev development schedules require `pnpm trigger:dev` and a running
+  local machine; production deployment/scheduling remains out of scope.
 
 ---
 
@@ -298,7 +323,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever manual discovery committed; 7.1B.1 manual Trigger.dev orchestration implemented locally; cron scheduling deferred to 7.1B.2 |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever committed; 7.1B.1 manual Trigger.dev orchestration committed; 7.1B.2 development-only declarative cron scheduling implemented locally |
 
 ---
 

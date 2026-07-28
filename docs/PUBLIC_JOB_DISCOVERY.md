@@ -217,12 +217,12 @@ Successfully scored public discoveries are therefore persisted with
 Discovery never creates an `applications` row. Human review remains required
 before shortlist, resume generation, or any future application action.
 
-## Future Phase 7.1B
+## Phase 7.1B Trigger.dev development scheduling
 
 Phase 7.1B.1 adds a manual Trigger.dev development task that orchestrates the
 existing Arbeitnow, Remotive, and Lever discovery adapters through the shared
-discovery runner. It is dry-run only, opens the local SQLite database read-only
-for deduplication, and never creates applications or submissions.
+discovery runner. It is dry-run only and never creates applications or
+submissions.
 
 ### Trigger.dev manual development orchestration
 
@@ -274,10 +274,27 @@ Retry and concurrency settings are conservative: two attempts maximum, short
 exponential backoff, queue concurrency limit of one, and a TTL that prevents
 stale queued discovery runs. Deterministic validation errors are not retried.
 
-No cron schedule, dashboard schedule, or recurring trigger is attached yet.
-Phase 7.1B.2 will add cron scheduling only after manual approval.
+### Trigger.dev development declarative schedules (Phase 7.1B.2)
 
-Trigger.dev scheduling for unattended production runs remains deferred until
-Phase 7.1B.2. A future scheduled task should continue calling these same
-adapters and the discovery runner rather than duplicating source, pipeline, or
-persistence logic.
+Two development-only declarative schedules are attached with `schedules.task()`:
+
+- `public-job-discovery-morning-dry-run`
+  - cron: `0 8 * * *`
+  - timezone: `Asia/Manila`
+  - environments: `["DEVELOPMENT"]`
+- `public-job-discovery-evening-dry-run`
+  - cron: `0 19 * * *`
+  - timezone: `Asia/Manila`
+  - environments: `["DEVELOPMENT"]`
+
+Both scheduled tasks call one shared helper that runs the same fixed dry-run
+payload as the manual task defaults (`developer`, remote-only, 50/50/50 limits,
+Lever companies `spotify`/`highspot`/`aleph`).
+
+Development schedules trigger only while the Trigger.dev dev CLI is running, and
+the local PC must be running for those scheduled runs to execute. These schedules
+never enable persistence or application submission.
+
+Trigger.dev scheduled persistence remains deferred to a later phase. After
+schedule stability is reviewed, the next step is controlled scheduled
+persistence with explicit approval boundaries.
