@@ -6,6 +6,11 @@ import { AppIcon } from '@/components/icons';
 import { JobList } from '@/components/JobList';
 import { PageHeader } from '@/components/PageHeader';
 import { toJobListItem } from '@/lib/jobs/view-model';
+import {
+  deriveMatchedProfileIds,
+  deriveMatchedProfileLabels,
+  getJobProfileFilterOptions,
+} from '@/lib/jobs/profile-targeting';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +37,15 @@ export default async function InternationalJobsPage() {
         }
       />
       <JobList
-        jobs={rows.map(toJobListItem)}
+        profileFilterOptions={getJobProfileFilterOptions()}
+        jobs={rows.map((row) => {
+          const matchedProfileIds = deriveMatchedProfileIds(row.job);
+          return {
+            ...toJobListItem(row),
+            matchedProfileIds,
+            matchedProfileLabels: deriveMatchedProfileLabels(matchedProfileIds),
+          };
+        })}
         emptyLabel="No international jobs have been imported yet."
       />
     </>

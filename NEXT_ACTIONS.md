@@ -1,7 +1,7 @@
 # Next Actions
 
-**Last updated:** 2026-07-28 PHT
-**Current state:** Phase 7.1B.2 adds development-only declarative Trigger.dev cron schedules for public-job discovery on top of the committed manual orchestration core. Morning (8:00 AM) and evening (7:00 PM) schedules run in `Asia/Manila`, `DEVELOPMENT` only, dry-run only, with temporary SQLite snapshot reads and no persistence/applications/submissions.
+**Last updated:** 2026-07-29 PHT
+**Current state:** Phase 7.1B.3 category-aware discovery has a bounded deterministic matcher and immutable source-summary snapshots implemented locally, but it still awaits final acceptance review. Primary role evidence is limited to explicit profile-specific technical titles or a closed, applicant-attributed action/object grammar inside one description clause. Every valid adapter candidate enters the shared identity registry before local filters; filtered or untargeted variants may be promoted by a later targeted duplicate without duplicate scoring. Lever boards have independent failure boundaries. Morning/evening schedules remain `DEVELOPMENT`-only and dry-run-only.
 
 ---
 
@@ -15,7 +15,23 @@
 3. Review Phase 7.1B.2 development schedules in
    `src/trigger/public-job-discovery-scheduled-dry-runs.ts` and shared helpers
    in `src/trigger/public-job-discovery-shared.ts`.
-4. Keep the Trigger.dev dev CLI running and PC powered on for development
+4. Review Phase 7.1B.3 profile configuration and deterministic matching in
+   `packages/ingestion/src/discovery/job-search-profiles.v1.ts` and retrieval
+   hints in `packages/ingestion/src/discovery/profile-retrieval-hints.v1.ts`.
+   Confirm generic AI/media/product/customer-support roles remain untargeted,
+   third-party actions do not count as applicant responsibilities, evidence is
+   not assembled across description/metadata fields, and every profile match
+   contains primary configured evidence.
+5. Review profile-aware orchestration/runner summaries in
+   `packages/ingestion/src/discovery/orchestration.ts` and
+   `packages/ingestion/src/discovery/runner.ts`. Confirm pre-filter identity
+   registration, filtered/untargeted promotion, safe source provenance, and
+   registry-finalized combined totals.
+6. Review dashboard profile badges/filters and server-side read-time matching in
+   `apps/dashboard/src/lib/jobs/view-model.ts`,
+   `apps/dashboard/src/components/JobList.tsx`, and
+   `apps/dashboard/src/components/JobDetailWorkspace.tsx`.
+7. Keep the Trigger.dev dev CLI running and PC powered on for development
    schedule execution:
 
    ```powershell
@@ -23,7 +39,7 @@
    pnpm trigger:dev
    ```
 
-5. Run either safe manual dry run:
+8. Run either safe manual dry run:
 
    ```powershell
    pnpm discovery:arbeitnow -- --limit 10 --pages 1 --remote-only
@@ -32,20 +48,31 @@
    pnpm discovery:lever -- --company spotify --company highspot --company aleph --remote-only --query "developer" --limit 50
    ```
 
-6. Do not use any source's `--apply` or the Trigger.dev task's persistence path
+9. Do not use any source's `--apply` or the Trigger.dev task's persistence path
    until mapping and real dry-run preview are approved.
-7. Do not enable scheduled persistence yet. Next step after schedule stability
+10. Do not enable scheduled persistence yet. Next step after schedule stability
    review is controlled scheduled persistence with explicit approval.
-5. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
+11. Historical verification run `run_06fqigvi9p0np4a1o5csdrov01` exposed a
+    Lever isolation defect: Spotify timed out and the old adapter did not
+    attempt Highspot or Aleph. The adapter now isolates each configured company,
+    retains successful boards, reports safe per-company outcomes, and caps
+    scheduled orchestration at one attempt per board. Replacement evening run
+    `run_06fqiq5oifn5pbkmmlbqcgrg01` then attempted and completed Spotify,
+    Highspot, and Aleph once each and reported `SUCCESS`. Treat this as one
+    time-specific verification, not a guarantee that all boards will always be
+    available. This run predates the final matcher/registry-only acceptance
+    changes; those later deterministic changes were verified by tests and
+    builds rather than a replacement live provider run.
+12. Review the redesigned overview, `/import-job`, PH and international lists, and scored/rejected
    detail pages.
-6. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
+13. Confirm that the local `GEMINI_API_KEY` remains only in `apps/dashboard/.env.local`; never move it
    to a `NEXT_PUBLIC_*` variable. Optional model overrides are `GEMINI_PRIMARY_MODEL` and
    `GEMINI_FALLBACK_MODEL`. An existing `GEMINI_MODEL` is supported only as a legacy fallback
    override.
-7. If a development server is already using `apps/dashboard/.next`, stop it before running
+14. If a development server is already using `apps/dashboard/.next`, stop it before running
    `pnpm build`; concurrent Next dev/build processes can contend for the same output directory.
-8. If the implementation is accepted, create a commit only after explicit user approval.
-9. Review the PSA Salary Grade 6 import and its explicit “reference only” treatment. The committed
+15. If the implementation is accepted, create a commit only after explicit user approval.
+16. Review the PSA Salary Grade 6 import and its explicit “reference only” treatment. The committed
    2026 DBM schedule and enrichment rules are documented in
    `docs/GOVERNMENT_SALARY_ENRICHMENT.md`.
 
@@ -65,6 +92,24 @@
 - Trigger.dev cron scheduling is development-only in Phase 7.1B.2. Local
   schedules run only while `pnpm trigger:dev` is active and the PC remains
   running.
+- Profile matching is deterministic rather than semantic AI classification.
+  It deliberately prioritizes precision over recall: only configured technical
+  title patterns or closed applicant-attributed clauses with a direct configured
+  action and bounded technical object establish primary evidence. Responsibility
+  imperatives qualify only as bullets inside an explicit responsibilities
+  section. Fields and separate clauses are never combined. Unusual wording,
+  longer modifiers, or unsupported grammar may therefore be missed.
+- Cross-source promotion applies only when the existing canonical URL or
+  semantic deduplication rules establish one identity. It does not weaken those
+  rules or use title-only matching. Filtered variants retain identity/provenance
+  but never become scoring or persistence candidates unless a later accepted
+  targeted variant promotes the shared identity.
+- The historical evening run found zero evidence-backed AI-augmented or
+  low-code roles. Its Spotify timeout was isolated from Arbeitnow and Remotive,
+  but was not isolated inside the Lever adapter and prevented Highspot/Aleph
+  from being checked. The corrected adapter now continues across independently
+  bounded board attempts; the replacement evening run completed all three
+  configured boards successfully.
 - Government salary enrichment currently supports only the verified 2026 DBM national-government
   schedule. Unsupported years, local-government roles, private employers, and unclear government
   coverage intentionally receive no reference range.

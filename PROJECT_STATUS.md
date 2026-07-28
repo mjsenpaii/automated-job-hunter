@@ -1,9 +1,134 @@
 # Project Status
 
-**Last updated:** 2026-07-28 PHT
-**Current phase:** Phase 7.1B.2 — Trigger.dev development cron scheduling (implemented locally, uncommitted)
-**Overall health:** 🟢 verification in progress for schedules
-**Active branch:** `master` at pushed baseline `d5b38ea` (Phase 7.1B.2 local changes uncommitted)
+**Last updated:** 2026-07-29 PHT
+**Current phase:** Phase 7.1B.3 — Job Search Profiles / Category-Aware Discovery (bounded acceptance candidate implemented locally, uncommitted)
+**Overall health:** Yellow — deterministic verification is passing, but final acceptance review is still required; latest live Trigger.dev run predates the bounded matcher fix
+**Active branch:** `master` at pushed baseline `0bfb052` (Phase 7.1B.3 local changes uncommitted)
+
+---
+
+## Session — Phase 7.1B.3 Job Search Profiles / Category-Aware Discovery
+
+Added deterministic, versioned job-search profiles and integrated profile-aware
+targeting into discovery orchestration while preserving dry-run safety.
+
+- Added `packages/ingestion/src/discovery/job-search-profiles.v1.ts` with
+  strict Zod validation, stable profile IDs, schedule grouping, deterministic
+  matching, duplicate-ID rejection, and non-IT false-positive protections.
+- Added `packages/ingestion/src/discovery/profile-retrieval-hints.v1.ts` for
+  deterministic schedule-group retrieval hints with one fetch per source per
+  run and explicit recall-limit notes where source APIs cannot express combined
+  search.
+- Extended discovery contracts/runner to carry strongly typed active profile
+  IDs, per-profile match stats/previews, and `UNTARGETED` summary counts.
+  Every valid adapter candidate now enters identity deduplication before local
+  filters or targeting; filtered and untargeted jobs remain excluded from
+  scoring/persistence while retaining safe source provenance.
+- Preserved existing deterministic eligibility, hard rejection, scoring,
+  recommendation, and deduplication as authoritative after profile targeting.
+- Preserved manual Trigger payload controls (source toggles, limits, remoteOnly,
+  Lever companies, query/category) and additively introduced validated
+  `profileIds` and optional `scheduleGroup`.
+- Updated schedule shared payloads to fixed MORNING/EVENING profile splits while
+  keeping `DEVELOPMENT`-only schedules, queue concurrency 1, retries, TTL, and
+  dry-run-only behavior.
+- Added backward-compatible snapshot metadata for future apply runs by storing
+  `targeting.matchedProfileIds` in the existing `raw_snapshot` JSON (no schema
+  migration).
+- Updated dashboard read model/UI to derive profile matches server-side at read
+  time, pass plain IDs/labels to client components, and expose profile badges +
+  filters (including Untargeted) without mutating existing rows.
+- Added tests for profile config/matching, retrieval-hint behavior, untargeted
+  flow, manual payload control retention, schedule profile split, and dashboard
+  badge/filter presence.
+- Hardened `ai_augmented_development` after live false positives. Generic AI,
+  software, product, prompt, Cursor, Copilot, media, marketing, content, video,
+  editing, and design wording does not qualify. Primary evidence is limited to
+  an explicit configured AI-assisted development title or a closed
+  applicant-attributed `use <AI coding tool> to <direct action> <bounded
+  technical object>` clause.
+- Added deterministic per-profile evidence using short configured phrases only:
+  primary `title_phrase`, `title_role`, `applicant_responsibility`, or
+  `applicant_contextual_phrase`, followed only by configured supporting
+  technology/platform/tag/skill/category labels. Full source descriptions are
+  never included in preview evidence.
+- Corrected vibe-coding reporting so it counts actual job evidence rather than
+  configuration presence. Multi-profile jobs still pass through ingestion and
+  scoring once, while untargeted jobs remain unscored and unpersisted.
+- Phase 7.1B.3 review hardening now uses a bounded deterministic grammar rather
+  than broad description search. It prioritizes precision over recall:
+  description primary evidence must match a complete configured
+  applicant-subject/action/object clause, with the technical object within a
+  small fixed token bound, or an imperative bullet inside an explicit
+  responsibilities section. Punctuation and HTML block/list boundaries are
+  parsed before matching, and later headings close responsibility sections.
+  Separate clauses, tags, skills, category, team, and department fields cannot
+  be combined into primary evidence; they can add supporting labels only after
+  a primary match. Unsupported or unusually phrased responsibilities may be
+  missed intentionally.
+- Lever board fetches now have independent company failure boundaries. Scheduled
+  orchestration attempts Spotify, Highspot, and Aleph at most once each,
+  preserves successful boards, and reports `SUCCESS`, `PARTIAL_SUCCESS`, or
+  `FAILED` with safe company IDs, a closed public error-code enum, and accurate
+  attempted/completed request counts.
+- Discovery orchestration now shares one in-memory deduplication context seeded
+  from the read-only database snapshot. Stable source order and the existing
+  canonical URL/company/title/date rules prevent cross-source duplicate scoring,
+  previews, profile totals, persistable totals, and vibe counts. Filtered and
+  untargeted identities are included: a later accepted or targeted duplicate
+  can promote the single identity, is scored at most once, and retains earlier
+  sources as safe provenance. Combined unique totals are finalized from
+  registry identities rather than duplicate-counter subtraction.
+- `runDiscovery()` now returns a detached source-summary snapshot. Later shared
+  context promotion updates internal registry accounting only; orchestration
+  explicitly materializes a fresh final source view, so an earlier caller's
+  counts, previews, persistence records, and provenance arrays do not mutate.
+- Supported profile IDs are now an explicit readonly tuple, producing both a
+  literal TypeScript union and runtime Zod validation without widening casts.
+- Dashboard profile options are built server-side and passed as plain
+  serializable IDs/labels. Behavioural tests cover badges, `Untargeted`, `ALL`,
+  individual profile filters, and multi-profile rows without importing the
+  ingestion runtime into client components.
+- Verified provider inputs against current official documentation. Remotive
+  uses its supported `software-dev` category in the morning and one broad
+  `developer` search in the evening. Arbeitnow uses its normal page once; Lever
+  caps each configured board at one request. Local matching remains authoritative and
+  the documented recall limits remain explicit.
+- Final automated verification for the bounded matcher/immutable-summary
+  acceptance candidate: focused matcher/runner/orchestration coverage passed
+  108/108 tests; the full suite passed 416/416 tests across 36 files; workspace
+  build passed 6/6; standalone dashboard production build and strict TypeScript
+  passed. No replacement live provider run was performed because the registered
+  task wrapper and provider request behavior did not change.
+- Historical registered Trigger.dev task
+  `public-job-discovery-evening-dry-run` completed as run
+  `run_06fqigvi9p0np4a1o5csdrov01`. Arbeitnow fetched 50 records in one request
+  (45 remote-filter exclusions, 5 untargeted); Remotive fetched 36 records in
+  one request (36 untargeted). The pre-fix Lever adapter timed out on Spotify
+  and incorrectly stopped before Highspot and Aleph. There were zero profile
+  matches, zero vibe-coding roles, zero
+  low-code roles, zero scored/persistable jobs, and no persistence,
+  applications, or submissions.
+- Replacement registered evening task run
+  `run_06fqiq5oifn5pbkmmlbqcgrg01` completed through Trigger.dev worker
+  `20260728.38`. Arbeitnow made one completed request; Remotive made one
+  completed request; Lever attempted and completed Spotify, Highspot, and Aleph
+  exactly once each and reported `SUCCESS` with no failed companies. The run
+  fetched 136 accepted records, classified 49 as untargeted, and identified one
+  duplicate without scoring it again. It produced zero profile matches, zero
+  vibe-coding roles, zero eligible/scored jobs, and zero jobs that would be
+  persisted. `persistenceEnabled` was false; applications and submissions
+  created were both zero.
+- The replacement evening run above predates the final same-clause
+  actor-attribution and pre-filter identity-registration changes. It remains
+  evidence for the Trigger.dev wrapper and Lever isolation behavior, not a
+  claim that the later deterministic matcher/registry code ran against live
+  providers.
+- SQLite was verified from copied before/after snapshots. `app.db` remained
+  byte-identical at SHA-256
+  `6BE8C92867401B5059933F102C69FB80BCC85493DD3D4725A92CCCD197780F38`;
+  no WAL/SHM sidecars existed before or after. Counts remained jobs 9,
+  job_scores 6, applications 0, and activity_log 0.
 
 ---
 
@@ -323,7 +448,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever committed; 7.1B.1 manual Trigger.dev orchestration committed; 7.1B.2 development-only declarative cron scheduling implemented locally |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever committed; 7.1B.1 manual Trigger.dev orchestration committed; 7.1B.2 development-only schedules and 7.1B.3 category-aware profiles implemented locally |
 
 ---
 
@@ -336,9 +461,9 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | `@job-app/scoring` | Hard rejection, 100-point factor scoring | 25 ✅ |
 | `@job-app/resume` | Resume profiles, DOCX generation, cover letters, quality gates | 16 ✅ |
 | `@job-app/db` | Drizzle ORM + SQLite (`dist` entry points, `exports`, `ensureSchema()` auto-provision) | Schema ready |
-| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, Remotive, Lever, manual + **URL-import adapter (SSRF-hardened)** | 160 ✅ |
+| `@job-app/ingestion` | Normalizer, pipeline, content cleaning, Gemini contracts, government enrichment, reusable public discovery, Arbeitnow, Remotive, Lever, manual + **URL-import adapter (SSRF-hardened)** | 274 ✅ |
 | `@job-app/application` | Package builder, state machine, daily limits | 12 ✅ |
-| `@job-app/dashboard` | Next.js productivity UI + hybrid Gemini importer + `ingestJob`-backed confirmation | 51 ✅ + build/runtime green |
+| `@job-app/dashboard` | Next.js productivity UI + hybrid Gemini importer + `ingestJob`-backed confirmation | 57 ✅ + build/runtime green |
 
 ### Generated Artifacts
 - `resumes/generated/resume-software-developer.docx` (8.9 KB)

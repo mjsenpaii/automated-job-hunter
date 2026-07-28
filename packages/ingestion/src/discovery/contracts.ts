@@ -4,6 +4,11 @@ import type {
   IngestionResult,
   RawJobInput,
 } from '../types.js';
+import {
+  JobSearchProfileIdListSchema,
+  type JobSearchProfileMatch,
+  type JobSearchProfileId,
+} from './job-search-profiles.v1.js';
 
 export const DiscoveryOptionsSchema = z.object({
   limit: z.number().int().min(1).max(100),
@@ -12,6 +17,7 @@ export const DiscoveryOptionsSchema = z.object({
   query: z.string(),
   category: z.string().default(''),
   apply: z.boolean(),
+  activeProfileIds: JobSearchProfileIdListSchema.optional(),
 });
 export type DiscoveryOptions = z.infer<typeof DiscoveryOptionsSchema>;
 
@@ -46,6 +52,37 @@ export interface DiscoveryFetchResult {
   invalidRecords: number;
   pagesFetched: number;
   jobs: DiscoveredJob[];
+  companyFetchReport?: DiscoveryCompanyFetchReport;
+}
+
+export const DiscoveryCompanyFetchErrorCodeSchema = z.enum([
+  'TIMEOUT',
+  'HTTP_ERROR',
+  'INVALID_RESPONSE',
+  'NETWORK_ERROR',
+  'UNKNOWN_SAFE_ERROR',
+]);
+export type DiscoveryCompanyFetchErrorCode = z.infer<
+  typeof DiscoveryCompanyFetchErrorCodeSchema
+>;
+
+export const DiscoveryCompanyFetchFailureSchema = z
+  .object({
+    companyId: z.string().trim().min(1),
+    errorCode: DiscoveryCompanyFetchErrorCodeSchema,
+  })
+  .strict();
+export type DiscoveryCompanyFetchFailure = z.infer<
+  typeof DiscoveryCompanyFetchFailureSchema
+>;
+
+export interface DiscoveryCompanyFetchReport {
+  configuredCompanies: string[];
+  attemptedCompanies: string[];
+  successfulCompanies: string[];
+  failedCompanies: DiscoveryCompanyFetchFailure[];
+  fetchRequestsAttempted: number;
+  fetchRequestsCompleted: number;
 }
 
 export interface DiscoverySourceAdapter {
@@ -55,9 +92,12 @@ export interface DiscoverySourceAdapter {
 
 export interface DiscoveryPersistenceRecord {
   discovered: DiscoveredJob;
+  additionalSourceNames: string[];
   raw: RawJobInput;
   result: IngestionResult;
   persistedStatus: 'DISCOVERED' | 'HARD_REJECTED';
+  matchedProfileIds: JobSearchProfileId[];
+  matchedProfileEvidence: JobSearchProfileMatch[];
 }
 
 export interface DiscoveryRepository {
@@ -66,6 +106,8 @@ export interface DiscoveryRepository {
 }
 
 export interface DiscoveryPreview {
+  sourceName: string;
+  additionalSourceNames: string[];
   title: string;
   company: string;
   location: string | null;
@@ -73,16 +115,31 @@ export interface DiscoveryPreview {
   status: 'DISCOVERED' | 'DUPLICATE' | 'HARD_REJECTED' | 'ERROR';
   score: number | null;
   recommendation: string | null;
+  matchedProfileIds: JobSearchProfileId[];
+  matchedProfileEvidence: JobSearchProfileMatch[];
+}
+
+export interface DiscoveryProfileStats {
+  profileId: JobSearchProfileId;
+  recordsMatched: number;
+  hardRejectedJobs: number;
+  eligibleScoredJobs: number;
+  jobsThatWouldBePersisted: number;
+  duplicates: number;
+  preview: DiscoveryPreview[];
 }
 
 export interface DiscoveryRunSummary {
   source: string;
   dryRun: boolean;
   reviewStatus: 'DISCOVERED';
+  activeProfileIds: JobSearchProfileId[];
   sourceRecordsFetched: number;
   acceptedRecords: number;
   invalidRecords: number;
   excludedByFilters: number;
+  untargeted: number;
+  vibeCodingRolesFound: number;
   duplicates: number;
   hardRejectedJobs: number;
   eligibleScoredJobs: number;
@@ -91,10 +148,38 @@ export interface DiscoveryRunSummary {
   jobsPersisted: number;
   pagesFetched: number;
   preview: DiscoveryPreview[];
+  profileStats: DiscoveryProfileStats[];
+  companyFetchReport?: DiscoveryCompanyFetchReport;
+}
+
+export interface DiscoveryDeduplicationContext {
+  knownJobs: NormalizedJob[];
+  registeredVariants?: DiscoveryIdentityVariant[];
+}
+
+export type DiscoveryIdentityVariantState =
+  | 'FILTERED'
+  | 'UNTARGETED'
+  | 'TARGETED'
+  | 'HARD_REJECTED'
+  | 'SCORED'
+  | 'PERSISTED_EXISTING';
+
+export interface DiscoveryIdentityVariant {
+  sourceName: string;
+  sourceJobId: string;
+  sourceUrl: string;
+  normalizedId: string;
+  passedLocalFilters: boolean;
+  state: DiscoveryIdentityVariantState;
+  matchedProfileIds: JobSearchProfileId[];
+  completenessScore: number;
+  sourceOrder: number;
 }
 
 export interface DiscoveryRunDependencies {
   adapter: DiscoverySourceAdapter;
   repository: DiscoveryRepository;
   verifiedSkills: SkillEntry[];
+  deduplicationContext?: DiscoveryDeduplicationContext;
 }

@@ -48,6 +48,7 @@ describe('Remotive public source adapter', () => {
     const result = await new RemotiveAdapter({
       fetchImpl,
       category: 'software-dev',
+      search: 'developer',
     }).fetchJobs({
       limit: 20,
       pages: 1,
@@ -77,7 +78,7 @@ describe('Remotive public source adapter', () => {
     });
     const [url, request] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
-      `${REMOTIVE_API_URL}?limit=20&category=software-dev`,
+      `${REMOTIVE_API_URL}?limit=20&category=software-dev&search=developer`,
     );
     expect(request?.headers).toMatchObject({
       Accept: 'application/json',

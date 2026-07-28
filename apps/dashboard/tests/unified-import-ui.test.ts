@@ -168,6 +168,24 @@ describe('unified importer UI behavior', () => {
     expect(getStatusPresentation('NOT_EVALUATED').label).toBe('Not evaluated');
   });
 
+  it('wires shared profile filters and badges into list and detail views', () => {
+    const list = source('src/components/JobList.tsx');
+    const detail = source('src/components/JobDetailWorkspace.tsx');
+    expect(list).toContain('profileFilterOptions.map');
+    expect(list).toContain('JobProfileBadges');
+    expect(list).toContain('Untargeted');
+    expect(detail).toContain('JobProfileBadges');
+  });
+
+  it('derives matched profile IDs at read time without mutation path', () => {
+    const targeting = source('src/lib/jobs/profile-targeting.ts');
+    expect(targeting).toContain('deriveMatchedProfileIds');
+    expect(targeting).toContain('matchJobSearchProfiles');
+    expect(targeting).not.toContain('.update(');
+    expect(targeting).not.toContain('.insert(');
+    expect(targeting).not.toContain('.delete(');
+  });
+
   it('explains model routing without displaying provider diagnostics', () => {
     expect(getAnalysisMethodPresentation(METADATA).label).toBe(
       'Analysed with Flash Lite',

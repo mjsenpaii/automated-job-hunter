@@ -89,6 +89,7 @@ export interface RemotiveAdapterDependencies {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   category?: string;
+  search?: string;
 }
 
 function sourceText(value: string | null | undefined): string | null {
@@ -142,6 +143,8 @@ async function fetchRemotive(
   url.searchParams.set('limit', String(limit));
   const category = dependencies.category?.trim();
   if (category) url.searchParams.set('category', category);
+  const search = dependencies.search?.trim();
+  if (search) url.searchParams.set('search', search);
 
   const controller = new AbortController();
   const timer = setTimeout(

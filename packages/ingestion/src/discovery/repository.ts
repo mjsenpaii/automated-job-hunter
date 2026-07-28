@@ -15,6 +15,7 @@ function snapshot(record: DiscoveryPersistenceRecord): string {
     source: 'public-discovery',
     attribution: {
       sourceName: record.discovered.sourceName,
+      additionalSourceNames: record.additionalSourceNames,
       sourceJobId: record.discovered.sourceJobId,
       sourceUrl: record.discovered.sourceUrl,
       location: record.discovered.location,
@@ -28,6 +29,10 @@ function snapshot(record: DiscoveryPersistenceRecord): string {
       tags: record.discovered.tags,
       publishedAt: record.discovered.publishedAt,
       updatedAt: record.discovered.updatedAt ?? null,
+    },
+    targeting: {
+      matchedProfileIds: record.matchedProfileIds,
+      matchedProfileEvidence: record.matchedProfileEvidence,
     },
     pipeline: {
       status: record.result.status,

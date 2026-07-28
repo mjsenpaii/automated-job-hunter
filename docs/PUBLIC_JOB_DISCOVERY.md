@@ -86,6 +86,11 @@ structured, so Gemini is not used.
   one run.
 - Requests: descriptive User-Agent and a bounded ten-second timeout per
   request.
+- Failure isolation: each configured company board has an independent failure
+  boundary. A timeout, non-2xx response, or invalid response from one board
+  does not stop later boards or discard jobs from earlier successful boards.
+  Scheduled orchestration attempts each configured board at most once and
+  reports only the configured site ID plus a safe error code.
 - Content: opening, description, requirements/list sections, and additional
   rich text are cleaned using the existing content cleaner.
 - Workplace variants: Lever's public Postings documentation uses `on-site`,
@@ -287,9 +292,12 @@ Two development-only declarative schedules are attached with `schedules.task()`:
   - timezone: `Asia/Manila`
   - environments: `["DEVELOPMENT"]`
 
-Both scheduled tasks call one shared helper that runs the same fixed dry-run
-payload as the manual task defaults (`developer`, remote-only, 50/50/50 limits,
-Lever companies `spotify`/`highspot`/`aleph`).
+Both scheduled tasks call one shared helper, but use different fixed profile
+payloads and retrieval hints. Morning targets software development and AI
+automation, while evening targets AI-augmented development and low-code/no-code.
+Both remain remote-only with 50/50/50 source limits and configured Lever boards
+`spotify`/`highspot`/`aleph`. Manual Trigger.dev payload defaults and the
+source-specific manual CLIs remain separate controls.
 
 Development schedules trigger only while the Trigger.dev dev CLI is running, and
 the local PC must be running for those scheduled runs to execute. These schedules
@@ -298,3 +306,106 @@ never enable persistence or application submission.
 Trigger.dev scheduled persistence remains deferred to a later phase. After
 schedule stability is reviewed, the next step is controlled scheduled
 persistence with explicit approval boundaries.
+
+## Phase 7.1B.3 Job Search Profiles / Category-Aware Discovery
+
+Phase 7.1B.3 replaces single-keyword targeting with deterministic, versioned
+job-search profiles while keeping all Trigger.dev schedules development-only and
+dry-run-only.
+
+- Profile configuration is versioned and validated in
+  `packages/ingestion/src/discovery/job-search-profiles.v1.ts`.
+- Active profile IDs are strongly typed and validated; unknown IDs and unknown
+  payload properties are rejected.
+- Manual Trigger payload controls are preserved (source toggles, limits,
+  remote-only, Lever companies, query/category), with `profileIds` added as a
+  validated optional selector.
+- Arbeitnow and Remotive are each fetched once per scheduled run. Lever is
+  invoked once and attempts each configured company board at most once.
+  Fetching is never multiplied by profile count.
+- Deterministic retrieval hints are schedule-group specific (morning vs
+  evening) and provider-local-profile matching remains authoritative.
+- Sources that cannot express combined server-side queries are still fetched
+  once from their normal feed; recall limitations are documented in retrieval
+  hint notes.
+- Every valid adapter-normalized source candidate is normalized for identity
+  and registered before remote-only, query, or category filters. A filtered
+  variant remains unscored and unpersisted, but its source identity and safe
+  provenance remain available to later source variants.
+- Jobs that pass local filters but match no active profile are summarized as
+  `UNTARGETED`, remain unscored, and are not persistence candidates.
+- Every match carries at least one deterministic primary evidence item.
+  Evidence uses only short configured phrases such as `title_phrase`,
+  `title_role`, `applicant_responsibility`, or
+  `applicant_contextual_phrase`; source description passages are never copied
+  into summaries. The matcher is a bounded deterministic grammar that
+  prioritizes precision over recall. Primary evidence comes only from an
+  explicit profile-specific technical title or a complete applicant-attributed
+  clause matching a configured direct action followed by a technical object
+  within a small fixed token bound. Imperative clauses qualify only as bullets
+  inside an explicit responsibilities section. HTML blocks/list items and
+  punctuation boundaries are separated before matching, and later headings end
+  the section. Separate description clauses, tags, skills, category, team, and
+  department fields are never combined to construct primary evidence; those
+  fields can add only short supporting evidence after a primary match exists.
+  Unusual wording and unsupported grammatical forms may be missed.
+- `ai_augmented_development` requires explicit AI-assisted coding or
+  development language. Generic AI, software, product, Cursor, Copilot, prompt,
+  media, marketing, content, video, editing, or design wording is insufficient.
+  Tool names may supplement an explicit contextual match but cannot create one.
+- `Vibe-coding roles found` is counted from actual matched job evidence. Merely
+  configuring `vibe coding` as a profile phrase never increments the count.
+- Existing deterministic eligibility, hard rejection, scoring, recommendation,
+  and deduplication logic remains authoritative for targeted jobs.
+- One orchestration-scoped in-memory deduplication context starts with the
+  read-only SQLite snapshot and is shared in stable Arbeitnow, Remotive, Lever
+  order. Filtered, targeted, untargeted, hard-rejected, and persisted-existing
+  identities from an earlier source participate in the same
+  existing canonical URL/company/title/date deduplication rules for later
+  sources. Cross-source duplicates are not scored, previewed, or counted as
+  persistable/profile/vibe matches twice.
+- When an earlier occurrence is filtered or untargeted and a later equivalent
+  occurrence has valid primary profile evidence, the single identity is
+  deterministically promoted to the later targeted record and scored once.
+  The earlier source is reclassified as a duplicate/provenance supplier, and
+  the combined preview retains it in `additionalSourceNames`. Filtered plus
+  filtered remains one unscored identity; filtered plus untargeted becomes one
+  untargeted identity; a later duplicate of an already targeted identity is
+  never rescored.
+- Per-source fetched/accepted counts continue to describe provider input.
+  Duplicate and untargeted source accounting is updated when promotion occurs,
+  while combined accepted/persistable/scored/profile/vibe totals are finalized
+  directly from unique registry identities rather than inferred by subtracting
+  source duplicate counters.
+- `runDiscovery()` returns an immutable snapshot of that source run. Later
+  variants update only internal registry accounting. Orchestration materializes
+  fresh final source summaries after all enabled sources finish, preserving
+  promotion/provenance without changing previously returned summary objects.
+- Future apply-mode metadata is backward-compatible: matched profile IDs are
+  stored additively under `targeting.matchedProfileIds` inside the existing
+  `raw_snapshot` JSON. No schema migration is required.
+- Dashboard profile badges/filters are derived server-side at read-time from
+  stored data and deterministic matching fallback, without mutating saved rows.
+
+Schedule retrieval remains one adapter run per source and one request per
+configured Lever board for the fixed 50-job scheduled payload:
+
+- Arbeitnow exposes no suitable full-text job query, so its latest remote page
+  is fetched once and filtered locally. Recall is limited to that page window.
+- Remotive officially supports `category` and `search`. Morning uses the
+  `software-dev` category; evening uses one broad `developer` search with no
+  category. The latter can miss low-code builder roles without developer
+  wording, and both remain subject to the 50-job ceiling.
+- Lever has no full-text search endpoint. Each configured board is attempted
+  once and filtered locally; roles outside those board results cannot be
+  recalled. Board outcomes are reported as `SUCCESS`, `PARTIAL_SUCCESS`, or
+  `FAILED`, with attempted/completed request counts and safe failed-board IDs.
+
+Provider hints only narrow retrieval. Deterministic local profile matching is
+always authoritative.
+
+The latest actual Trigger.dev evening verification run predates the final
+pre-filter registry work and this bounded matcher/immutable-summary fix. These
+deterministic changes are verified through automated matcher, runner,
+orchestration, adapter, dashboard, and schedule tests plus production builds;
+they are not represented as a replacement live provider run.

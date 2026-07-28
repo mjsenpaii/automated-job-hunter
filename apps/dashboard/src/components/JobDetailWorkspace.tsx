@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { JobDetailData } from '@/lib/jobs/job-export';
 import { AppIcon } from './icons';
 import { JobExportActions } from './JobExportActions';
+import { JobProfileBadges } from './JobProfileBadges';
 import StatusBadge from './StatusBadge';
 
 type DetailTab =
@@ -115,6 +116,13 @@ export function JobDetailWorkspace({ job }: { job: JobDetailData }) {
           </h1>
           <p>
             <span className="job-identity-label">Company:</span> {job.company}
+          </p>
+          <p>
+            <span className="job-identity-label">Targeting:</span>{' '}
+            <JobProfileBadges
+              matchedProfileIds={job.matchedProfileIds}
+              matchedProfileLabels={job.matchedProfileLabels}
+            />
           </p>
         </div>
         <JobExportActions job={{ ...job, status }} />

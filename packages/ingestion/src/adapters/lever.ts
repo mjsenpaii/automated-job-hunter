@@ -3,6 +3,7 @@ import { cleanJobContent } from '../content-cleaner.js';
 import {
   DiscoveredJobSchema,
   type DiscoveredJob,
+  type DiscoveryCompanyFetchFailure,
   type DiscoveryFetchResult,
   type DiscoveryOptions,
   type DiscoverySourceAdapter,
@@ -95,6 +96,7 @@ export class LeverDiscoveryError extends Error {
   constructor(
     readonly code: LeverErrorCode,
     message: string,
+    readonly requestCompleted = false,
   ) {
     super(message);
     this.name = 'LeverDiscoveryError';
@@ -105,6 +107,7 @@ export interface LeverAdapterDependencies {
   companies: LeverCompany[];
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  maxRequestsPerCompany?: number;
 }
 
 function sourceText(value: string | null | undefined): string | null {
@@ -277,11 +280,13 @@ async function fetchLeverPage(
         throw new LeverDiscoveryError(
           'BOARD_UNAVAILABLE',
           `Configured Lever board ${company.displayName} (${company.site}) is unavailable.`,
+          true,
         );
       }
       throw new LeverDiscoveryError(
         'HTTP_ERROR',
         `Lever returned HTTP ${response.status} for ${company.displayName}. Try again later.`,
+        true,
       );
     }
 
@@ -298,6 +303,7 @@ async function fetchLeverPage(
       throw new LeverDiscoveryError(
         'SERVICE_UNAVAILABLE',
         `Lever board ${company.displayName} is currently unavailable. Try again later.`,
+        true,
       );
     }
 
@@ -308,6 +314,7 @@ async function fetchLeverPage(
       throw new LeverDiscoveryError(
         'MALFORMED_JSON',
         `Lever returned malformed JSON for ${company.displayName}.`,
+        true,
       );
     }
     const parsed = LeverEnvelopeSchema.safeParse(json);
@@ -315,12 +322,36 @@ async function fetchLeverPage(
       throw new LeverDiscoveryError(
         'SOURCE_SCHEMA_CHANGED',
         `Lever returned an unexpected response shape for ${company.displayName}.`,
+        true,
       );
     }
     return parsed.data;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function safeCompanyFailure(
+  company: LeverCompany,
+  error: unknown,
+): DiscoveryCompanyFetchFailure {
+  const errorCode: DiscoveryCompanyFetchFailure['errorCode'] =
+    error instanceof LeverDiscoveryError
+      ? error.code === 'TIMEOUT'
+        ? 'TIMEOUT'
+        : error.code === 'HTTP_ERROR' || error.code === 'BOARD_UNAVAILABLE'
+          ? 'HTTP_ERROR'
+          : error.code === 'MALFORMED_JSON' ||
+              error.code === 'SOURCE_SCHEMA_CHANGED'
+            ? 'INVALID_RESPONSE'
+            : error.code === 'SERVICE_UNAVAILABLE'
+              ? 'NETWORK_ERROR'
+              : 'UNKNOWN_SAFE_ERROR'
+      : 'UNKNOWN_SAFE_ERROR';
+  return {
+    companyId: company.site,
+    errorCode,
+  };
 }
 
 export class LeverAdapter implements DiscoverySourceAdapter {
@@ -346,6 +377,17 @@ export class LeverAdapter implements DiscoverySourceAdapter {
         'Configured Lever companies must have unique site identifiers.',
       );
     }
+    if (
+      dependencies.maxRequestsPerCompany !== undefined &&
+      (!Number.isInteger(dependencies.maxRequestsPerCompany) ||
+        dependencies.maxRequestsPerCompany < 1 ||
+        dependencies.maxRequestsPerCompany > 3)
+    ) {
+      throw new LeverDiscoveryError(
+        'INVALID_CONFIGURATION',
+        'Lever requests per company must be between one and three.',
+      );
+    }
     this.companies = parsed.data;
   }
 
@@ -357,6 +399,12 @@ export class LeverAdapter implements DiscoverySourceAdapter {
     let sourceRecordsFetched = 0;
     let invalidRecords = 0;
     let pagesFetched = 0;
+    let fetchRequestsAttempted = 0;
+    let fetchRequestsCompleted = 0;
+    const configuredCompanies = this.companies.map((company) => company.site);
+    const attemptedCompanies: string[] = [];
+    const successfulCompanies: string[] = [];
+    const failedCompanies: DiscoveryCompanyFetchFailure[] = [];
 
     for (
       let companyIndex = 0;
@@ -365,56 +413,83 @@ export class LeverAdapter implements DiscoverySourceAdapter {
     ) {
       const company = this.companies[companyIndex];
       if (!company) continue;
+      attemptedCompanies.push(company.site);
       const companiesRemaining = this.companies.length - companyIndex;
-      const companyLimit = Math.ceil(
+      const companyLimit = Math.max(0, Math.ceil(
         (options.limit - jobs.length) / companiesRemaining,
-      );
+      ));
       let companyAccepted = 0;
       let skip = 0;
+      let companyRequests = 0;
+      const companyJobs: DiscoveredJob[] = [];
+      let companySourceRecordsFetched = 0;
+      let companyInvalidRecords = 0;
 
-      while (companyAccepted < companyLimit) {
-        const requestLimit = Math.min(
-          PAGE_SIZE,
-          companyLimit - companyAccepted,
-        );
-        const candidates = await fetchLeverPage(
-          company,
-          skip,
-          requestLimit,
-          this.dependencies,
-        );
-        pagesFetched += 1;
-        const acceptedBeforePage = companyAccepted;
+      try {
+        while (
+          (companyAccepted < companyLimit || companyRequests === 0) &&
+          companyRequests <
+            (this.dependencies.maxRequestsPerCompany ??
+              Number.POSITIVE_INFINITY)
+        ) {
+          const requestLimit = Math.max(
+            1,
+            Math.min(PAGE_SIZE, companyLimit - companyAccepted),
+          );
+          fetchRequestsAttempted += 1;
+          companyRequests += 1;
+          const candidates = await fetchLeverPage(
+            company,
+            skip,
+            requestLimit,
+            this.dependencies,
+          );
+          fetchRequestsCompleted += 1;
+          pagesFetched += 1;
+          const acceptedBeforePage = companyAccepted;
 
-        for (const candidate of candidates) {
+          for (const candidate of candidates) {
+            if (
+              companyAccepted >= companyLimit ||
+              jobs.length + companyJobs.length >= options.limit
+            ) {
+              break;
+            }
+            companySourceRecordsFetched += 1;
+            const parsed = LeverRecordSchema.safeParse(candidate);
+            if (!parsed.success) {
+              companyInvalidRecords += 1;
+              continue;
+            }
+            try {
+              companyJobs.push(mapLeverRecord(parsed.data, company));
+              companyAccepted += 1;
+            } catch {
+              companyInvalidRecords += 1;
+            }
+          }
+
+          skip += candidates.length;
           if (
-            companyAccepted >= companyLimit ||
-            jobs.length >= options.limit
+            candidates.length < requestLimit ||
+            candidates.length === 0 ||
+            companyAccepted === acceptedBeforePage
           ) {
             break;
           }
-          sourceRecordsFetched += 1;
-          const parsed = LeverRecordSchema.safeParse(candidate);
-          if (!parsed.success) {
-            invalidRecords += 1;
-            continue;
-          }
-          try {
-            jobs.push(mapLeverRecord(parsed.data, company));
-            companyAccepted += 1;
-          } catch {
-            invalidRecords += 1;
-          }
         }
-
-        skip += candidates.length;
+        sourceRecordsFetched += companySourceRecordsFetched;
+        invalidRecords += companyInvalidRecords;
+        jobs.push(...companyJobs);
+        successfulCompanies.push(company.site);
+      } catch (error) {
         if (
-          candidates.length < requestLimit ||
-          candidates.length === 0 ||
-          companyAccepted === acceptedBeforePage
+          error instanceof LeverDiscoveryError &&
+          error.requestCompleted
         ) {
-          break;
+          fetchRequestsCompleted += 1;
         }
+        failedCompanies.push(safeCompanyFailure(company, error));
       }
     }
 
@@ -424,6 +499,14 @@ export class LeverAdapter implements DiscoverySourceAdapter {
       invalidRecords,
       pagesFetched,
       jobs,
+      companyFetchReport: {
+        configuredCompanies,
+        attemptedCompanies,
+        successfulCompanies,
+        failedCompanies,
+        fetchRequestsAttempted,
+        fetchRequestsCompleted,
+      },
     };
   }
 }

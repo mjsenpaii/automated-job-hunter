@@ -4,7 +4,12 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { JobListItem } from '@/lib/jobs/view-model';
 import { formatPersistedDate } from '@/lib/jobs/view-model';
+import {
+  matchesJobProfileFilter,
+  type JobProfileFilterOption,
+} from '@/lib/jobs/profile-filtering';
 import { AppIcon } from './icons';
+import { JobProfileBadges } from './JobProfileBadges';
 import StatusBadge from './StatusBadge';
 
 const PAGE_SIZE = 25;
@@ -12,13 +17,16 @@ const PAGE_SIZE = 25;
 export function JobList({
   jobs,
   emptyLabel,
+  profileFilterOptions,
 }: {
   jobs: JobListItem[];
   emptyLabel: string;
+  profileFilterOptions: JobProfileFilterOption[];
 }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('ALL');
   const [workSetup, setWorkSetup] = useState('ALL');
+  const [profileFilter, setProfileFilter] = useState('ALL');
   const [sort, setSort] = useState('SCORE');
   const [limit, setLimit] = useState(PAGE_SIZE);
 
@@ -30,7 +38,8 @@ export function JobList({
         return (
           (!needle || text.includes(needle)) &&
           (status === 'ALL' || job.status === status) &&
-          (workSetup === 'ALL' || job.workSetup === workSetup)
+          (workSetup === 'ALL' || job.workSetup === workSetup) &&
+          matchesJobProfileFilter(job.matchedProfileIds, profileFilter)
         );
       })
       .sort((a, b) => {
@@ -40,7 +49,7 @@ export function JobList({
         if (sort === 'COMPANY') return a.company.localeCompare(b.company);
         return (b.score ?? -1) - (a.score ?? -1);
       });
-  }, [jobs, query, sort, status, workSetup]);
+  }, [jobs, profileFilter, query, sort, status, workSetup]);
 
   const visible = filtered.slice(0, limit);
   const statuses = [...new Set(jobs.map((job) => job.status))].sort();
@@ -93,6 +102,22 @@ export function JobList({
           </select>
         </label>
         <label>
+          <span className="visually-hidden">Filter by profile</span>
+          <select
+            className="select compact-select"
+            value={profileFilter}
+            onChange={(event) => setProfileFilter(event.target.value)}
+          >
+            <option value="ALL">All target profiles</option>
+            {profileFilterOptions.map((option) => (
+              <option value={option.id} key={option.id}>
+                {option.label}
+              </option>
+            ))}
+            <option value="UNTARGETED">Untargeted</option>
+          </select>
+        </label>
+        <label>
           <span className="visually-hidden">Sort jobs</span>
           <select
             className="select compact-select"
@@ -114,7 +139,7 @@ export function JobList({
         <div className="list-empty">
           <AppIcon name="search" />
           <h2>No matching jobs</h2>
-          <p>{query || status !== 'ALL' || workSetup !== 'ALL' ? 'Try clearing a filter.' : emptyLabel}</p>
+          <p>{query || status !== 'ALL' || workSetup !== 'ALL' || profileFilter !== 'ALL' ? 'Try clearing a filter.' : emptyLabel}</p>
         </div>
       ) : (
         <>
@@ -141,6 +166,11 @@ export function JobList({
                         {job.title}
                       </Link>
                       <span className="job-company">{job.company}</span>
+                      <JobProfileBadges
+                        matchedProfileIds={job.matchedProfileIds}
+                        matchedProfileLabels={job.matchedProfileLabels}
+                        className="job-company"
+                      />
                     </td>
                     <td>{job.location}</td>
                     <td>{job.workSetup.replace(/_/g, ' ')}</td>
@@ -172,6 +202,10 @@ export function JobList({
                 <div>
                   <strong>{job.title}</strong>
                   <span>{job.company}</span>
+                  <JobProfileBadges
+                    matchedProfileIds={job.matchedProfileIds}
+                    matchedProfileLabels={job.matchedProfileLabels}
+                  />
                 </div>
                 <StatusBadge status={job.status} />
                 <dl>

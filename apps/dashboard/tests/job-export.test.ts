@@ -19,6 +19,8 @@ const JOB: JobDetailData = {
   eligibility: 'ELIGIBLE',
   employmentType: 'FULL_TIME',
   category: 'INTERNATIONAL',
+  matchedProfileIds: ['software_development'],
+  matchedProfileLabels: ['Software Development'],
   seniority: 'SENIOR',
   salary: null,
   salaryGrade: null,

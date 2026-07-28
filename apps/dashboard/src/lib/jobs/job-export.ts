@@ -12,6 +12,8 @@ export interface JobDetailData {
   eligibility: string | null;
   employmentType: string;
   category: string | null;
+  matchedProfileIds: string[];
+  matchedProfileLabels: string[];
   seniority: string;
   salary: string | null;
   salaryGrade: number | null;
@@ -103,6 +105,11 @@ export function formatJobDetailsAsText(job: JobDetailData): string {
     `Source URL: ${job.sourceUrl || 'Not provided'}`,
     `Status: ${readableValue(job.status, 'Not recorded')}`,
     `Category: ${readableValue(job.category, 'Not classified')}`,
+    `Targeting profiles: ${
+      job.matchedProfileLabels.length > 0
+        ? job.matchedProfileLabels.join(', ')
+        : 'Untargeted'
+    }`,
     `Seniority: ${readableValue(job.seniority, 'Not specified')}`,
     `Location: ${readableValue(job.location, 'Not specified')}`,
     `Work setup: ${readableValue(job.workSetup, 'Not specified')}`,

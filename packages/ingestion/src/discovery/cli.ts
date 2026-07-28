@@ -385,6 +385,8 @@ export function formatDiscoverySummary(
     `Hard-rejected jobs: ${summary.hardRejectedJobs}`,
     `Eligible/scored jobs: ${summary.eligibleScoredJobs}`,
     `Pipeline errors: ${summary.pipelineErrors}`,
+    `Untargeted: ${summary.untargeted}`,
+    `Vibe-coding roles found: ${summary.vibeCodingRolesFound}`,
     `Jobs that would be persisted: ${summary.jobsThatWouldBePersisted}`,
     `Jobs persisted: ${summary.jobsPersisted}`,
     `Review status for scored discoveries: ${summary.reviewStatus}`,
@@ -393,8 +395,16 @@ export function formatDiscoverySummary(
   if (summary.preview.length > 0) {
     lines.push('', 'Preview (descriptions omitted):');
     summary.preview.forEach((job, index) => {
+      const evidence = job.matchedProfileEvidence
+        .map(
+          (match) =>
+            `${match.profileId}=[${match.evidence
+              .map((item) => `${item.type}:${item.value}`)
+              .join(', ')}]`,
+        )
+        .join('; ');
       lines.push(
-        `${index + 1}. [${job.status}] ${job.title} — ${job.company} | ${job.location ?? 'Location unknown'} | Score: ${job.score ?? 'Not scored'} | ${job.recommendation ?? 'No recommendation'} | ${job.sourceUrl}`,
+        `${index + 1}. [${job.status}] ${job.title} — ${job.company} | ${job.location ?? 'Location unknown'} | Score: ${job.score ?? 'Not scored'} | ${job.recommendation ?? 'No recommendation'} | ${job.sourceUrl} | Source: ${job.sourceName}${job.additionalSourceNames.length > 0 ? ` (+ ${job.additionalSourceNames.join(', ')})` : ''} | Matched profile evidence: ${evidence}`,
       );
     });
   }

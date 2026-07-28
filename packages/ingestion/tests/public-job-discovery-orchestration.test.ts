@@ -91,16 +91,41 @@ function remotiveEnvelope(
   };
 }
 
+function leverRecord(
+  site: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: `${site}-developer-1`,
+    text: 'Junior TypeScript Developer',
+    categories: {
+      commitment: 'Full time',
+      department: 'Engineering',
+      location: 'Remote',
+      team: 'Product Engineering',
+      allLocations: ['Remote'],
+    },
+    createdAt: 1_753_651_200_000,
+    openingPlain: 'Write TypeScript software and ship web applications.',
+    hostedUrl: `https://jobs.lever.co/${site}/${site}-developer-1`,
+    workplaceType: 'remote',
+    ...overrides,
+  };
+}
+
 function mockFetchForSources(
   handlers: Partial<
-    Record<'arbeitnow' | 'remotive' | 'lever', () => Promise<Response>>
+    Record<
+      'arbeitnow' | 'remotive' | 'lever',
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >
   >,
 ): typeof fetch {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('arbeitnow.com')) {
       return handlers.arbeitnow
-        ? handlers.arbeitnow()
+        ? handlers.arbeitnow(input, init)
         : Response.json({
             data: [],
             links: {},
@@ -109,11 +134,13 @@ function mockFetchForSources(
     }
     if (url.includes('remotive.com')) {
       return handlers.remotive
-        ? handlers.remotive()
+        ? handlers.remotive(input, init)
         : Response.json(remotiveEnvelope());
     }
     if (url.includes('api.lever.co')) {
-      return handlers.lever ? handlers.lever() : Response.json([]);
+      return handlers.lever
+        ? handlers.lever(input, init)
+        : Response.json([]);
     }
     throw new Error(`Unexpected fetch URL in test: ${url}`);
   }) as typeof fetch;
@@ -390,6 +417,8 @@ describe('public job discovery orchestration', () => {
       pipelineErrors: 0,
       jobsThatWouldBePersisted: 3,
       jobsPersisted: 0,
+      untargeted: 0,
+      vibeCodingRolesFound: 0,
     });
   });
 
@@ -550,6 +579,8 @@ describe('public job discovery orchestration', () => {
     const output = formatPublicJobDiscoveryDryRunForLog(result);
 
     expect(output).toContain('Preview (descriptions omitted)');
+    expect(output).toContain('Vibe-coding roles found: 0');
+    expect(output).toContain('Matched profile evidence:');
     expect(output).not.toContain(secretDescription);
     expect(output).not.toContain('should-not-print');
     expect(result.sources.arbeitnow?.preview.length).toBeLessThanOrEqual(5);
@@ -686,7 +717,426 @@ describe('public job discovery orchestration', () => {
 
     expect(result.sources.remotive?.error?.code).toBe('SERVICE_UNAVAILABLE');
     expect(result.sources.remotive?.error?.message).toContain('unavailable');
-    expect(result.sources.lever?.error?.code).toBe('HTTP_ERROR');
+    expect(result.sources.lever).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'ALL_BOARDS_FAILED' },
+      failedCompanies: [
+        { companyId: 'spotify', errorCode: 'HTTP_ERROR' },
+        { companyId: 'highspot', errorCode: 'HTTP_ERROR' },
+        { companyId: 'aleph', errorCode: 'HTTP_ERROR' },
+      ],
+      fetchRequestsAttempted: 3,
+      fetchRequestsCompleted: 3,
+    });
     expect(JSON.stringify(result)).not.toMatch(/at\s+\w+/);
+  });
+
+  it('keeps manual payload controls and validates profileIds', async () => {
+    await expect(
+      runPublicJobDiscoveryDryRun({
+        profileIds: ['unknown_profile'],
+      }),
+    ).rejects.toBeInstanceOf(PublicJobDiscoveryValidationError);
+
+    const repository = createRepository();
+    const fetchImpl = mockFetchForSources({
+      arbeitnow: async () =>
+        Response.json({
+          data: [],
+          links: {},
+          meta: { current_page: 1 },
+        }),
+      remotive: async () => Response.json(remotiveEnvelope()),
+      lever: async () => Response.json([]),
+    });
+
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        arbeitnowEnabled: true,
+        remotiveEnabled: true,
+        leverEnabled: true,
+        remoteOnly: true,
+        arbeitnowLimit: 5,
+        remotiveLimit: 6,
+        leverLimit: 7,
+        leverCompanies: ['spotify'],
+        profileIds: ['software_development', 'ai_automation'],
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(result.activeProfileIds).toEqual([
+      'software_development',
+      'ai_automation',
+    ]);
+    expect(result.persistenceEnabled).toBe(false);
+  });
+
+  it('fetches each source only once per run and uses schedule-group retrieval hints', async () => {
+    const repository = createRepository();
+    const fetchImpl = mockFetchForSources({
+      arbeitnow: async () =>
+        Response.json({
+          data: [],
+          links: {},
+          meta: { current_page: 1 },
+        }),
+      remotive: async () => Response.json(remotiveEnvelope()),
+      lever: async () => Response.json([]),
+    });
+    const remotiveFetchJobs = vi.spyOn(
+      RemotiveAdapter.prototype,
+      'fetchJobs',
+    );
+
+    const morning = await runPublicJobDiscoveryDryRun(
+      {
+        scheduleGroup: 'MORNING',
+        query: '',
+        category: '',
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(remotiveFetchJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50 }),
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    const fetchMock = vi.mocked(fetchImpl);
+    const morningRemotiveUrl = String(
+      fetchMock.mock.calls.find((call) =>
+        String(call[0]).includes('remotive.com'),
+      )?.[0],
+    );
+    expect(morningRemotiveUrl).toContain('category=software-dev');
+    expect(morning.sources.arbeitnow?.fetchRequests).toBe(1);
+    expect(morning.sources.remotive?.fetchRequests).toBe(1);
+    expect(morning.sources.lever?.fetchRequests).toBe(3);
+
+    const evening = await runPublicJobDiscoveryDryRun(
+      {
+        scheduleGroup: 'EVENING',
+        query: '',
+        category: '',
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
+    const eveningRemotiveUrl = String(
+      fetchMock.mock.calls
+        .slice(5)
+        .find((call) => String(call[0]).includes('remotive.com'))
+        ?.[0],
+    );
+    expect(eveningRemotiveUrl).not.toContain('category=software-dev');
+    expect(eveningRemotiveUrl).toContain('search=developer');
+    expect(evening.sources.arbeitnow?.fetchRequests).toBe(1);
+    expect(evening.sources.remotive?.fetchRequests).toBe(1);
+    expect(evening.sources.lever?.fetchRequests).toBe(3);
+    remotiveFetchJobs.mockRestore();
+  });
+
+  it('does not apply the Remotive category hint to sources without categories', async () => {
+    const repository = createRepository();
+    const fetchImpl = mockFetchForSources({
+      arbeitnow: async () =>
+        Response.json({
+          data: [
+            {
+              slug: 'morning-typescript-developer',
+              company_name: 'Example GmbH',
+              title: 'Junior TypeScript Developer',
+              description: 'Build TypeScript applications with React.',
+              remote: true,
+              url: 'https://www.arbeitnow.com/jobs/companies/example/morning-typescript-developer',
+              tags: ['TypeScript', 'React'],
+              job_types: ['Full time'],
+              location: 'Remote',
+              created_at: 1_753_651_200,
+            },
+          ],
+          links: {},
+          meta: { current_page: 1 },
+        }),
+      remotive: async () => Response.json(remotiveEnvelope()),
+      lever: async () => Response.json([]),
+    });
+
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        scheduleGroup: 'MORNING',
+        query: '',
+        category: '',
+        profileIds: ['software_development', 'ai_automation'],
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(result.sources.arbeitnow?.excludedByFilters).toBe(0);
+    expect(result.sources.arbeitnow?.eligibleScoredJobs).toBe(1);
+  });
+
+  it('retains automation matches without developer title and marks unrelated records untargeted', async () => {
+    const repository = createRepository();
+    const fetchImpl = mockFetchForSources({
+      arbeitnow: async () =>
+        Response.json({
+          data: [],
+          links: {},
+          meta: { current_page: 1 },
+        }),
+      remotive: async () =>
+        Response.json(
+          remotiveEnvelope([
+            {
+              id: 2001,
+              url: 'https://remotive.com/remote-jobs/software-development/marketing-automation-engineer-2001',
+              title: 'Marketing Automation Engineer',
+              company_name: 'Automation Labs',
+              category: 'Software Development',
+              tags: ['n8n', 'workflow automation', 'integrations'],
+              publication_date: '2026-07-28T00:00:00.000Z',
+              candidate_required_location: 'Worldwide',
+              job_type: 'full_time',
+              description:
+                'Build n8n workflows and API integrations for customer lifecycle automation.',
+            },
+            {
+              id: 2002,
+              url: 'https://remotive.com/remote-jobs/marketing/head-of-marketing-communications-2002',
+              title: 'Head of Marketing & Communications',
+              company_name: 'Brand Co',
+              category: 'Marketing',
+              tags: ['branding'],
+              publication_date: '2026-07-28T00:00:00.000Z',
+              candidate_required_location: 'Worldwide',
+              job_type: 'full_time',
+              description: 'Lead brand communications strategy.',
+            },
+          ]),
+        ),
+      lever: async () => Response.json([]),
+    });
+
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        arbeitnowEnabled: false,
+        remotiveEnabled: true,
+        leverEnabled: false,
+        query: '',
+        category: '',
+        profileIds: ['ai_automation', 'software_development'],
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(result.sources.remotive?.eligibleScoredJobs).toBe(1);
+    expect(result.sources.remotive?.untargeted).toBe(1);
+    expect(result.profileSummaries.find((item) => item.profileId === 'ai_automation')?.recordsMatched).toBeGreaterThan(0);
+  });
+
+  it('reports partial Lever success and continues after a timed-out company', async () => {
+    const fetchImpl = mockFetchForSources({
+      lever: (input, init) => {
+        const site = new URL(String(input)).pathname.split('/').at(-1);
+        if (site === 'spotify') {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('private timeout', 'AbortError'));
+            });
+          });
+        }
+        return Promise.resolve(Response.json([leverRecord(site ?? 'unknown')]));
+      },
+    });
+
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        arbeitnowEnabled: false,
+        remotiveEnabled: false,
+        leverEnabled: true,
+        query: '',
+        remoteOnly: true,
+        leverCompanies: ['spotify', 'highspot', 'aleph'],
+        profileIds: ['software_development'],
+      },
+      {
+        fetchImpl,
+        timeoutMs: 1,
+        repository: createRepository(),
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+
+    expect(result.sources.lever).toMatchObject({
+      status: 'PARTIAL_SUCCESS',
+      configuredCompanies: ['spotify', 'highspot', 'aleph'],
+      attemptedCompanies: ['spotify', 'highspot', 'aleph'],
+      successfulCompanies: ['highspot', 'aleph'],
+      failedCompanies: [{ companyId: 'spotify', errorCode: 'TIMEOUT' }],
+      fetchRequestsAttempted: 3,
+      fetchRequestsCompleted: 2,
+      acceptedRecords: 2,
+      eligibleScoredJobs: 2,
+      jobsThatWouldBePersisted: 2,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private timeout|stack|headers/i);
+  });
+
+  it('reports SUCCESS only when every configured Lever board succeeds', async () => {
+    const fetchImpl = mockFetchForSources({
+      lever: async (input) => {
+        const site = new URL(String(input)).pathname.split('/').at(-1);
+        return Response.json([leverRecord(site ?? 'unknown')]);
+      },
+    });
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        arbeitnowEnabled: false,
+        remotiveEnabled: false,
+        leverEnabled: true,
+        query: '',
+        remoteOnly: true,
+        leverCompanies: ['spotify', 'highspot', 'aleph'],
+        profileIds: ['software_development'],
+      },
+      {
+        fetchImpl,
+        repository: createRepository(),
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+    expect(result.sources.lever).toMatchObject({
+      status: 'SUCCESS',
+      successfulCompanies: ['spotify', 'highspot', 'aleph'],
+      failedCompanies: [],
+      fetchRequestsAttempted: 3,
+      fetchRequestsCompleted: 3,
+    });
+  });
+
+  it('promotes a pre-filter identity and derives unique combined totals from registry finalization', async () => {
+    const postedSeconds = 1_785_196_800;
+    const title = 'AI-Augmented Developer - Vibe Coding';
+    const company = 'Example Labs';
+    const targetedDescription =
+      'You will use Cursor and Claude Code to develop and ship applications.';
+    const fetchImpl = mockFetchForSources({
+      arbeitnow: async () =>
+        Response.json({
+          data: [
+            {
+              slug: 'ai-augmented-developer',
+              company_name: company,
+              title,
+              description:
+                'Coordinate product documentation with the engineering organization.',
+              remote: false,
+              url: 'https://www.arbeitnow.com/jobs/companies/example/ai-augmented-developer',
+              tags: [],
+              job_types: ['Full time'],
+              location: 'Manila, Philippines',
+              created_at: postedSeconds,
+            },
+          ],
+          links: {},
+          meta: { current_page: 1 },
+        }),
+      remotive: async () =>
+        Response.json(
+          remotiveEnvelope([
+            {
+              id: 9001,
+              url: 'https://remotive.com/remote-jobs/software-development/ai-augmented-developer-9001',
+              title,
+              company_name: company,
+              category: 'Software Development',
+              tags: ['vibe coding', 'coding-agent workflow'],
+              publication_date: new Date(
+                postedSeconds * 1_000,
+              ).toISOString(),
+              candidate_required_location: 'Manila, Philippines',
+              job_type: 'full_time',
+              description: targetedDescription,
+            },
+          ]),
+        ),
+    });
+    const repository = createRepository();
+
+    const result = await runPublicJobDiscoveryDryRun(
+      {
+        arbeitnowEnabled: true,
+        remotiveEnabled: true,
+        leverEnabled: false,
+        query: '',
+        remoteOnly: true,
+        profileIds: ['ai_augmented_development'],
+      },
+      {
+        fetchImpl,
+        repository,
+        verifiedSkills: VERIFIED_SKILLS,
+      },
+    );
+    expect(result.sources.arbeitnow).toMatchObject({
+      excludedByFilters: 1,
+      eligibleScoredJobs: 0,
+      jobsThatWouldBePersisted: 0,
+      untargeted: 0,
+      duplicates: 1,
+    });
+    expect(result.sources.remotive).toMatchObject({
+      eligibleScoredJobs: 1,
+      jobsThatWouldBePersisted: 1,
+      duplicates: 0,
+    });
+    expect(result.sources.remotive?.preview).toHaveLength(1);
+    expect(result.sources.remotive?.preview[0]).toMatchObject({
+      sourceName: 'Remotive',
+      additionalSourceNames: ['Arbeitnow'],
+    });
+    expect(result.combinedTotals).toMatchObject({
+      acceptedRecords: 1,
+      excludedByFilters: 1,
+      eligibleScoredJobs: 1,
+      jobsThatWouldBePersisted: 1,
+      duplicates: 1,
+      vibeCodingRolesFound: 1,
+    });
+    expect(result.profileSummaries[0]).toMatchObject({
+      profileId: 'ai_augmented_development',
+      recordsMatched: 1,
+      eligibleScoredJobs: 1,
+      jobsThatWouldBePersisted: 1,
+    });
+    expect(result.profileSummaries[0]?.preview).toHaveLength(1);
+    expect(result.combinedPreview).toHaveLength(1);
+    expect(result.combinedPreview[0]).toMatchObject({
+      sourceName: 'Remotive',
+      additionalSourceNames: ['Arbeitnow'],
+    });
+    expect(repository.persistBatch).not.toHaveBeenCalled();
   });
 });

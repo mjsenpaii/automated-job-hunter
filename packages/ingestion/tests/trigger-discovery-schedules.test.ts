@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fixedPublicJobDiscoveryDryRunPayload } from "../../../src/trigger/public-job-discovery-shared";
+import {
+  fixedEveningPublicJobDiscoveryDryRunPayload,
+  fixedMorningPublicJobDiscoveryDryRunPayload,
+} from "../../../src/trigger/public-job-discovery-shared";
 
 const scheduledTaskFile = path.resolve(
   __dirname,
@@ -34,17 +37,37 @@ describe("Trigger.dev discovery schedules", () => {
     expect(scheduled).not.toMatch(/PRODUCTION|STAGING|PREVIEW/);
   });
 
-  it("uses the fixed discovery payload values", () => {
-    expect(fixedPublicJobDiscoveryDryRunPayload).toEqual({
+  it("uses fixed morning profile payload values", () => {
+    expect(fixedMorningPublicJobDiscoveryDryRunPayload).toEqual({
       arbeitnowEnabled: true,
       remotiveEnabled: true,
       leverEnabled: true,
-      query: "developer",
+      query: "",
+      category: "software-dev",
       remoteOnly: true,
       arbeitnowLimit: 50,
       remotiveLimit: 50,
       leverLimit: 50,
       leverCompanies: ["spotify", "highspot", "aleph"],
+      scheduleGroup: "MORNING",
+      profileIds: ["software_development", "ai_automation"],
+    });
+  });
+
+  it("uses fixed evening profile payload values", () => {
+    expect(fixedEveningPublicJobDiscoveryDryRunPayload).toEqual({
+      arbeitnowEnabled: true,
+      remotiveEnabled: true,
+      leverEnabled: true,
+      query: "",
+      category: "",
+      remoteOnly: true,
+      arbeitnowLimit: 50,
+      remotiveLimit: 50,
+      leverLimit: 50,
+      leverCompanies: ["spotify", "highspot", "aleph"],
+      scheduleGroup: "EVENING",
+      profileIds: ["ai_augmented_development", "low_code_no_code"],
     });
   });
 
@@ -87,8 +110,18 @@ describe("Trigger.dev discovery schedules", () => {
   it("stays dry-run and does not create persistence or applications", () => {
     const shared = source(sharedFile);
     expect(shared).toContain("runPublicJobDiscoveryDryRun(");
-    expect(shared).toContain("fixedPublicJobDiscoveryDryRunPayload");
+    expect(shared).toContain("fixedPayloadForSchedule");
     expect(shared).not.toMatch(/--apply|apply:\s*true|persistBatch|applicationsCreated:\s*[1-9]/);
+  });
+
+  it("uses different intended retrieval hints by schedule group", () => {
+    expect(fixedMorningPublicJobDiscoveryDryRunPayload.category).toBe(
+      "software-dev",
+    );
+    expect(fixedEveningPublicJobDiscoveryDryRunPayload.category).toBe("");
+    expect(fixedMorningPublicJobDiscoveryDryRunPayload.profileIds).not.toEqual(
+      fixedEveningPublicJobDiscoveryDryRunPayload.profileIds,
+    );
   });
 
   it("retains temporary snapshot safety boundary", () => {

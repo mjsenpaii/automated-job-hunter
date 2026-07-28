@@ -12,6 +12,10 @@ import {
 import type { JobDetailData } from '@/lib/jobs/job-export';
 import { getDatabase } from '@/lib/db';
 import {
+  deriveMatchedProfileIds,
+  deriveMatchedProfileLabels,
+} from '@/lib/jobs/profile-targeting';
+import {
   formatPersistedDate,
   resolveRecordedRejectionReasons,
   safeParseRecord,
@@ -168,6 +172,7 @@ export default async function JobDetailPage({
   const rawSource = row.job.raw_snapshot
     ? JSON.stringify(sanitizeSnapshot(snapshot ?? row.job.raw_snapshot), null, 2)
     : 'No source snapshot was persisted.';
+  const matchedProfileIds = deriveMatchedProfileIds(row.job);
 
   const detail: JobDetailData = {
     id: row.job.id,
@@ -189,6 +194,8 @@ export default async function JobDetailPage({
       extractionString(extraction, 'employment_type', 'employmentType') ??
       row.job.employment_type,
     category: row.job.category,
+    matchedProfileIds,
+    matchedProfileLabels: deriveMatchedProfileLabels(matchedProfileIds),
     seniority: row.job.seniority,
     salary: formatSalary(row.job),
     salaryGrade:

@@ -3,11 +3,11 @@ import {
   LEVER_API_ORIGIN,
   LEVER_USER_AGENT,
   LeverAdapter,
-  LeverDiscoveryError,
   buildLeverPostingsUrl,
   mapLeverRecord,
   type LeverRecord,
 } from '../src/adapters/lever.js';
+import { DiscoveryCompanyFetchFailureSchema } from '../src/discovery/contracts.js';
 import type { LeverCompany } from '../src/discovery/lever-companies.v1.js';
 
 const SPOTIFY: LeverCompany = {
@@ -18,6 +18,11 @@ const SPOTIFY: LeverCompany = {
 const HIGHSPOT: LeverCompany = {
   displayName: 'Highspot',
   site: 'highspot',
+  enabled: true,
+};
+const ALEPH: LeverCompany = {
+  displayName: 'Aleph',
+  site: 'aleph',
   enabled: true,
 };
 
@@ -226,6 +231,14 @@ describe('Lever public company-board adapter', () => {
       'Highspot',
     ]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.companyFetchReport).toEqual({
+      configuredCompanies: ['spotify', 'highspot'],
+      attemptedCompanies: ['spotify', 'highspot'],
+      successfulCompanies: ['spotify', 'highspot'],
+      failedCompanies: [],
+      fetchRequestsAttempted: 2,
+      fetchRequestsCompleted: 2,
+    });
   });
 
   it('rejects more than ten companies and never accepts more than 100 jobs', async () => {
@@ -268,68 +281,122 @@ describe('Lever public company-board adapter', () => {
     ).rejects.toThrow();
   });
 
-  it('returns a safe timeout error', async () => {
+  it('isolates a Spotify timeout and continues to Highspot and Aleph once each', async () => {
     const fetchImpl = vi.fn(
-      (_input: URL | RequestInfo, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'));
+      (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+        const site = new URL(String(input)).pathname.split('/').at(-1);
+        if (site === 'spotify') {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('private timeout detail', 'AbortError'));
+            });
           });
-        }),
+        }
+        return Promise.resolve(
+          response([
+            record({
+              id: `${site}-developer`,
+              hostedUrl: `https://jobs.lever.co/${site}/${site}-developer`,
+            }),
+          ]),
+        );
+      },
     );
-    await expect(
-      new LeverAdapter({
-        companies: [SPOTIFY],
-        fetchImpl,
-        timeoutMs: 1,
-      }).fetchJobs({ limit: 1, pages: 1 }),
-    ).rejects.toMatchObject<Partial<LeverDiscoveryError>>({
-      code: 'TIMEOUT',
+    const result = await new LeverAdapter({
+      companies: [SPOTIFY, HIGHSPOT, ALEPH],
+      fetchImpl,
+      timeoutMs: 1,
+      maxRequestsPerCompany: 1,
+    }).fetchJobs({ limit: 9, pages: 1 });
+
+    expect(result.jobs.map((job) => job.company)).toEqual([
+      'Highspot',
+      'Aleph',
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(result.companyFetchReport).toEqual({
+      configuredCompanies: ['spotify', 'highspot', 'aleph'],
+      attemptedCompanies: ['spotify', 'highspot', 'aleph'],
+      successfulCompanies: ['highspot', 'aleph'],
+      failedCompanies: [{ companyId: 'spotify', errorCode: 'TIMEOUT' }],
+      fetchRequestsAttempted: 3,
+      fetchRequestsCompleted: 2,
     });
+    expect(JSON.stringify(result)).not.toContain('private timeout detail');
   });
 
-  it('reports unavailable and non-2xx boards without response diagnostics', async () => {
-    await expect(
-      new LeverAdapter({
-        companies: [SPOTIFY],
-        fetchImpl: vi.fn(async () => new Response(null, { status: 404 })),
-      }).fetchJobs({ limit: 1, pages: 1 }),
-    ).rejects.toMatchObject<Partial<LeverDiscoveryError>>({
-      code: 'BOARD_UNAVAILABLE',
-      message: 'Configured Lever board Spotify (spotify) is unavailable.',
-    });
+  it('keeps an earlier successful board when a later board fails', async () => {
+    const result = await new LeverAdapter({
+      companies: [SPOTIFY, HIGHSPOT],
+      maxRequestsPerCompany: 1,
+      fetchImpl: vi.fn(async (input: URL | RequestInfo) => {
+        const site = new URL(String(input)).pathname.split('/').at(-1);
+        return site === 'spotify'
+          ? response([record()])
+          : new Response('private provider diagnostic', { status: 503 });
+      }),
+    }).fetchJobs({ limit: 10, pages: 1 });
 
-    await expect(
-      new LeverAdapter({
-        companies: [SPOTIFY],
-        fetchImpl: vi.fn(async () =>
-          new Response('private provider diagnostic', { status: 503 }),
-        ),
-      }).fetchJobs({ limit: 1, pages: 1 }),
-    ).rejects.toMatchObject<Partial<LeverDiscoveryError>>({
-      code: 'HTTP_ERROR',
-      message: 'Lever returned HTTP 503 for Spotify. Try again later.',
+    expect(result.jobs).toHaveLength(1);
+    expect(result.jobs[0]?.company).toBe('Spotify');
+    expect(result.companyFetchReport).toMatchObject({
+      successfulCompanies: ['spotify'],
+      failedCompanies: [{ companyId: 'highspot', errorCode: 'HTTP_ERROR' }],
+      fetchRequestsAttempted: 2,
+      fetchRequestsCompleted: 2,
     });
+    expect(JSON.stringify(result)).not.toContain('private provider diagnostic');
   });
 
-  it('rejects malformed JSON and changed response envelopes safely', async () => {
-    await expect(
-      new LeverAdapter({
-        companies: [SPOTIFY],
-        fetchImpl: vi.fn(async () => new Response('{bad json')),
-      }).fetchJobs({ limit: 1, pages: 1 }),
-    ).rejects.toMatchObject<Partial<LeverDiscoveryError>>({
-      code: 'MALFORMED_JSON',
+  it('reports all failed boards with safe codes and no provider payloads', async () => {
+    const result = await new LeverAdapter({
+      companies: [SPOTIFY, HIGHSPOT, ALEPH],
+      maxRequestsPerCompany: 1,
+      fetchImpl: vi.fn(async (input: URL | RequestInfo) => {
+        const site = new URL(String(input)).pathname.split('/').at(-1);
+        if (site === 'spotify') return new Response('{private malformed json');
+        if (site === 'highspot') {
+          return new Response(
+            JSON.stringify({ jobs: ['private provider payload'] }),
+          );
+        }
+        return new Response('private service body', { status: 503 });
+      }),
+    }).fetchJobs({ limit: 10, pages: 1 });
+
+    expect(result.jobs).toEqual([]);
+    expect(result.companyFetchReport).toEqual({
+      configuredCompanies: ['spotify', 'highspot', 'aleph'],
+      attemptedCompanies: ['spotify', 'highspot', 'aleph'],
+      successfulCompanies: [],
+      failedCompanies: [
+        { companyId: 'spotify', errorCode: 'INVALID_RESPONSE' },
+        { companyId: 'highspot', errorCode: 'INVALID_RESPONSE' },
+        { companyId: 'aleph', errorCode: 'HTTP_ERROR' },
+      ],
+      fetchRequestsAttempted: 3,
+      fetchRequestsCompleted: 3,
     });
-    await expect(
-      new LeverAdapter({
-        companies: [SPOTIFY],
-        fetchImpl: vi.fn(async () =>
-          new Response(JSON.stringify({ jobs: [record()] })),
-        ),
-      }).fetchJobs({ limit: 1, pages: 1 }),
-    ).rejects.toMatchObject<Partial<LeverDiscoveryError>>({
-      code: 'SOURCE_SCHEMA_CHANGED',
+    expect(JSON.stringify(result)).not.toMatch(
+      /private malformed|private provider|private service|stack/i,
+    );
+  });
+
+  it('rejects unsupported public company failure codes', () => {
+    expect(
+      DiscoveryCompanyFetchFailureSchema.safeParse({
+        companyId: 'spotify',
+        errorCode: 'MALFORMED_JSON',
+      }).success,
+    ).toBe(false);
+    expect(
+      DiscoveryCompanyFetchFailureSchema.parse({
+        companyId: 'spotify',
+        errorCode: 'INVALID_RESPONSE',
+      }),
+    ).toEqual({
+      companyId: 'spotify',
+      errorCode: 'INVALID_RESPONSE',
     });
   });
 

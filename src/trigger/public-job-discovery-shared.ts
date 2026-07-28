@@ -6,6 +6,7 @@ import {
 import {
   formatPublicJobDiscoveryDryRunForLog,
   PublicJobDiscoveryValidationError,
+  type PublicJobDiscoveryDryRunPayload,
   runPublicJobDiscoveryDryRun,
 } from "@job-app/ingestion/discovery/orchestration";
 
@@ -14,11 +15,12 @@ export const publicJobDiscoveryQueue = queue({
   concurrencyLimit: 1,
 });
 
-export const fixedPublicJobDiscoveryDryRunPayload = {
+const baseFixedPayload = {
   arbeitnowEnabled: true,
   remotiveEnabled: true,
   leverEnabled: true,
-  query: "developer",
+  query: "",
+  category: "",
   remoteOnly: true,
   arbeitnowLimit: 50,
   remotiveLimit: 50,
@@ -27,6 +29,29 @@ export const fixedPublicJobDiscoveryDryRunPayload = {
 } as const;
 
 export type PublicJobDiscoveryScheduleLabel = "MORNING" | "EVENING";
+
+export const fixedMorningPublicJobDiscoveryDryRunPayload: PublicJobDiscoveryDryRunPayload =
+  {
+    ...baseFixedPayload,
+    scheduleGroup: "MORNING",
+    profileIds: ["software_development", "ai_automation"],
+    category: "software-dev",
+  };
+
+export const fixedEveningPublicJobDiscoveryDryRunPayload: PublicJobDiscoveryDryRunPayload =
+  {
+    ...baseFixedPayload,
+    scheduleGroup: "EVENING",
+    profileIds: ["ai_augmented_development", "low_code_no_code"],
+  };
+
+export function fixedPayloadForSchedule(
+  scheduleLabel: PublicJobDiscoveryScheduleLabel,
+): PublicJobDiscoveryDryRunPayload {
+  return scheduleLabel === "MORNING"
+    ? fixedMorningPublicJobDiscoveryDryRunPayload
+    : fixedEveningPublicJobDiscoveryDryRunPayload;
+}
 
 export interface ScheduledPublicJobDiscoveryDryRunResult {
   scheduleLabel: PublicJobDiscoveryScheduleLabel;
@@ -57,8 +82,9 @@ export async function runScheduledPublicJobDiscoveryDryRun(
         ? new Date(payload.timestamp)
         : new Date();
   const timezone = payload.timezone ?? "Asia/Manila";
+  const fixedPayload = fixedPayloadForSchedule(scheduleLabel);
   const result = await runPublicJobDiscoveryDryRun(
-    fixedPublicJobDiscoveryDryRunPayload,
+    fixedPayload,
   );
   const runCompletedAt = new Date().toISOString();
   const safeSummary = [

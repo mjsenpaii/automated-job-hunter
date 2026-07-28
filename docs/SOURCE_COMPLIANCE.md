@@ -34,8 +34,8 @@ For every job board or data source, document the following before enabling:
 - **Restrictions**: Fixed Arbeitnow API host only; no employer-page crawling,
   authentication, CAPTCHA handling, rate-limit bypass, application creation, or
   submission.
-- **Compliance Status**: Approved for manual dry-run-first discovery in Phase
-  7.1A. Trigger.dev scheduling remains disabled pending Phase 7.1B review.
+- **Compliance Status**: Approved for manual and development-only Trigger.dev
+  dry runs. Scheduled persistence remains disabled.
 
 ---
 
@@ -54,16 +54,21 @@ For every job board or data source, document the following before enabling:
   addresses.
 - **Rate Limits**: Remotive advises at most four requests per day and states
   that excessive traffic above two requests per minute will be blocked. The
-  repository permits one explicit manual request per CLI run and caps it at 50
-  accepted jobs.
+  repository performs one request per run, caps it at 50 accepted jobs, and
+  keeps the two development schedules within the four-requests-per-day
+  guidance when manual runs are avoided on the same day.
+- **Supported retrieval inputs**: The official API documents `category`,
+  `company_name`, `search`, and `limit`. Discovery uses only one category or
+  search hint per scheduled request: `software-dev` in the morning and the
+  broad search `developer` in the evening. Local deterministic profile
+  matching remains authoritative.
 - **Permitted Automation**: Local, read-only retrieval and deterministic review
   of public structured listings while retaining Remotive attribution.
 - **Restrictions**: Fixed Remotive API host only; no redistribution to other
   job boards, employer/application-link crawling, authentication, CAPTCHA
   handling, rate-limit bypass, application creation, or submission.
-- **Compliance Status**: Approved for manual dry-run-first local discovery in
-  Phase 7.1A.2. Trigger.dev scheduling remains disabled pending Phase 7.1B
-  review.
+- **Compliance Status**: Approved for manual and development-only Trigger.dev
+  dry runs. Scheduled persistence remains disabled.
 
 ---
 
@@ -92,6 +97,16 @@ For every job board or data source, document the following before enabling:
   documentation reviewed for Phase 7.1A.3. This repository uses explicit manual
   runs, a ten-second request timeout, at most ten configured companies, and no
   more than 100 accepted jobs per run.
+- **Failure isolation and reporting**: Scheduled discovery attempts each
+  configured company at most once. Each board has an independent failure
+  boundary, so a failed board cannot prevent later configured boards or discard
+  jobs from earlier successful boards. Reports include only configured site
+  IDs, the closed safe error-code set `TIMEOUT`, `HTTP_ERROR`,
+  `INVALID_RESPONSE`, `NETWORK_ERROR`, and `UNKNOWN_SAFE_ERROR`, plus
+  attempted/completed request counts; response payloads, headers, stack traces,
+  raw URLs, and provider diagnostics are never returned. This boundary fixes
+  the historical run in which a Spotify timeout stopped Highspot and Aleph
+  before they were attempted.
 - **Permitted Automation**: Read-only retrieval of published jobs from
   explicitly configured public company boards through Lever's documented API.
 - **Restrictions**: Fixed global Lever API host only; configured and
@@ -99,6 +114,6 @@ For every job board or data source, document the following before enabling:
   internal/hidden jobs, application-form retrieval or submission,
   employer-page crawling, browser automation, login, cookies, CAPTCHA handling,
   rate-limit bypass, or auto-application.
-- **Compliance Status**: Approved for manual dry-run-first local discovery in
-  Phase 7.1A.3. Trigger.dev scheduling remains disabled pending Phase 7.1B
-  review.
+- **Compliance Status**: Approved for manual and development-only Trigger.dev
+  dry runs. Trigger orchestration attempts each configured board at most once
+  per run; scheduled persistence remains disabled.

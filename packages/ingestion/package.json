@@ -29,6 +29,14 @@
     "./discovery/orchestration": {
       "types": "./dist/discovery/orchestration.d.ts",
       "default": "./dist/discovery/orchestration.js"
+    },
+    "./discovery/job-search-profiles": {
+      "types": "./dist/discovery/job-search-profiles.v1.d.ts",
+      "default": "./dist/discovery/job-search-profiles.v1.js"
+    },
+    "./discovery/profile-retrieval-hints": {
+      "types": "./dist/discovery/profile-retrieval-hints.v1.d.ts",
+      "default": "./dist/discovery/profile-retrieval-hints.v1.js"
     }
   },
   "scripts": {

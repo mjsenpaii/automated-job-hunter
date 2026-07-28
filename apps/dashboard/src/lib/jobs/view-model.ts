@@ -11,6 +11,8 @@ export interface JobListItem {
   status: string;
   date: string | null;
   category: string | null;
+  matchedProfileIds: string[];
+  matchedProfileLabels: string[];
 }
 
 export function formatPersistedDate(value: string | null): string {
@@ -41,6 +43,8 @@ export function toJobListItem(row: {
     status: row.job.status,
     date: row.job.date_posted || row.job.created_at || null,
     category: row.job.category,
+    matchedProfileIds: [],
+    matchedProfileLabels: ['Untargeted'],
   };
 }
 
