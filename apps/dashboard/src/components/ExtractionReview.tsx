@@ -11,6 +11,7 @@ import type {
   GeminiExtractionMetadata,
   GeminiJobExtraction,
 } from '@job-app/ingestion/gemini-contracts';
+import type { VerifiedJobRequirementsExtraction } from '@job-app/ingestion/job-requirements-contracts';
 import { updateExtractionField } from '@/lib/import/extraction-state';
 import { AppIcon } from './icons';
 import { ExtractionOverviewFields } from './ExtractionOverviewFields';
@@ -58,6 +59,7 @@ export function ExtractionReview({
   extraction,
   originalContent,
   metadata,
+  verifiedRequirements,
   editing,
   scoring,
   result,
@@ -70,6 +72,7 @@ export function ExtractionReview({
   extraction: EnrichedGeminiJobExtraction;
   originalContent: string;
   metadata: GeminiExtractionMetadata;
+  verifiedRequirements: VerifiedJobRequirementsExtraction | null;
   editing: boolean;
   scoring: boolean;
   result: JobImportResult | null;
@@ -195,6 +198,7 @@ export function ExtractionReview({
               extraction={extraction}
               editing={editing}
               set={set}
+              verifiedRequirements={verifiedRequirements}
             />
           )}
           {tab === 'application' && (

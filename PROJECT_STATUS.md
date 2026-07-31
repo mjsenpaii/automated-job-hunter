@@ -1,9 +1,149 @@
 # Project Status
 
-**Last updated:** 2026-07-29 PHT
-**Current phase:** Phase 7.1B.3 — Job Search Profiles / Category-Aware Discovery (bounded acceptance candidate implemented locally, uncommitted)
-**Overall health:** Yellow — deterministic verification is passing, but final acceptance review is still required; latest live Trigger.dev run predates the bounded matcher fix
-**Active branch:** `master` at pushed baseline `0bfb052` (Phase 7.1B.3 local changes uncommitted)
+**Last updated:** 2026-08-01 PHT
+**Current phase:** Phase 7.1B.4A-B — Controlled persistence and verified requirements extraction complete
+**Overall health:** Green — the one-time DEVELOPMENT persistence validation and atomic 14-job requirements reprocessing completed successfully; recurring and production persistence remain disabled
+**Active branch:** `master` at pushed baseline `c668314` (Phase 7.1B.4A-B changes ready for commit)
+
+---
+
+## Session — Phase 7.1B.4B Candidate-First Extraction and Reprocessing
+
+Phase 7.1B.4B.1 stabilizes the server-only requirements pipeline without
+discarding the uncommitted Phase 7.1B.4A/7.1B.4B work.
+
+- Existing Gemini use was previously limited to the dashboard manual-import
+  analysis route. Controlled discovery and saved-job reprocessing had no
+  contextual requirements extraction, which is why the saved Spotify job
+  retained only the older deterministic fields and omitted most qualifications.
+- Preprocessing now uses an HTML parser, preserves headings/list boundaries and
+  the byte-identical raw description, normalizes supported provider dates and
+  explicit salary syntax, and reuses the existing canonical URL implementation.
+- Deterministic preprocessing now enumerates every heading, bullet, standalone
+  clause, and available provider metadata value as a stable candidate. Gemini
+  returns exactly one ordered decision per candidate ID and cannot supply
+  replacement evidence or scalar numbers. Missing, unknown, duplicate, or
+  reordered IDs fail closed.
+- Requirements extraction explicitly uses the configured primary model slot,
+  currently `gemini-3.5-flash-lite`, once per job with a bounded 45-second
+  timeout and no silent requirements-model fallback.
+- Independent local verification owns experience/salary numbers, exact
+  evidence, required/preferred cues, safe aliases, restrictions, and timezones.
+  Salary currency, minimum, maximum, period, and additional compensation have
+  separate statuses, so an uncertain period no longer invalidates a range.
+  Only `VERIFIED` facts can reach scoring or hard rejection; review/conflict
+  facts remain display-only.
+- Added one additive `job_extractions` table keyed one-to-one by job ID. It
+  stores versioned verified JSON, content hash, safe model identifier, status,
+  and timestamps. Raw descriptions are never overwritten.
+- Manual import and future controlled persistence use the same candidate,
+  verification, and stored-extraction contracts. Controlled persistence calls
+  Gemini only after final unique candidate selection, at most five times, and
+  skips a selected candidate on extraction failure without replacement.
+- Added dry-run-first `pnpm reprocess-job-extractions` support for existing jobs.
+  Apply is all-or-nothing: every eligible non-skipped job must have a valid
+  completed write plan before the single SQLite transaction begins. It never
+  creates/deletes jobs or applications, uses a separate
+  `JOB_REQUIREMENTS_REPROCESSING_COMPLETED` activity event, and skips unchanged
+  content/model/schema hashes.
+- The dashboard Requirements view now presents verified experience,
+  required/preferred qualifications, degrees/certifications/languages,
+  restrictions, timezone/schedule, salary, work setup, evidence, provenance,
+  conflicts, and whether each fact affected scoring.
+- The original Spotify salary conflict was diagnosed exactly: Gemini returned
+  `"$"` while local parsing resolved `USD`; all numbers, equity, and the null
+  period agreed. Candidate-first extraction removes model-authored numbers.
+- Spotify now stores verified 3 years `REQUIRED`, USD 132949–189927 plus
+  equity, North America, and Eastern Standard Time. The timezone display value
+  was canonically repaired from `Eastern Standard` without changing its exact
+  evidence, score, status, salary, or requirements.
+- Stage B passed on the saved LawnStarter and A.Team layouts without accepting
+  ambiguous currency or responsibility-only technologies. The final all-14
+  shadow used `gemini-3.5-flash-lite` once per job with no fallback, produced
+  14 valid extractions, accepted zero unsupported facts, and confirmed that
+  conflicts/review-only facts affected neither scoring nor hard rejection.
+- Exactly one all-or-nothing apply wrote 14 extraction records, updated six
+  score rows, removed PSA's obsolete score, and added one distinct
+  `JOB_REQUIREMENTS_REPROCESSING_COMPLETED` activity entry. Jobs remained 14;
+  job scores changed 7→6; applications remained 0; activity changed 1→2; and
+  job extractions changed 0→14. Raw descriptions and job identities were
+  unchanged.
+- Status/score reconciliation: Spotify Android 39→38, SEPPmail 42→41,
+  Spotify Backend 30→28, A.Team 41→40, Lemon.io DevOps 30→44, and Kettner
+  35→34 all moved `DISCOVERED`→`SCORING_COMPLETED`. PSA moved
+  `SCORING_COMPLETED` (43)→`HARD_REJECTED` (no score) solely because verified
+  provider expiry `2026-07-28` produced `EXPIRED`.
+- The garden3d salary conflict and PSA employment-type conflict remain
+  review-only and had no automatic effect. Existing hard-rejected jobs were
+  not promoted.
+- The final full suite passed 472/472. Workspace build passed 6/6; dashboard
+  and ingestion strict TypeScript/build verification and `git diff --check`
+  passed.
+- The post-apply idempotency dry-run made 0 Gemini calls, skipped all 14 rows by
+  content hash, and wrote 0 records/scores/activity entries.
+- Recurring schedules remain DEVELOPMENT-only/DRY_RUN-only; production
+  persistence remains disabled.
+
+See `docs/JOB_REQUIREMENTS_EXTRACTION.md` for the trust boundary, storage model,
+shadow results, and current limitations.
+
+---
+
+## Session — Phase 7.1B.4A Controlled Persistence
+
+Phase 7.1B.4A adds one manually triggered, unscheduled persistence task while
+leaving the morning and evening cron tasks dry-run-only.
+
+- Dedicated task ID:
+  `public-job-discovery-controlled-persistence`.
+- Persistence is rejected unless the Trigger.dev environment is
+  `DEVELOPMENT`, the process-local
+  `JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED` kill switch is exactly
+  `true`, the strict payload requests `CONTROLLED`, the limit is 1–5, and the
+  dedicated task ID is executing.
+- The strict payload accepts only `scheduleGroup`, `persistenceMode`,
+  `maxJobsToPersist`, and a bounded `idempotencyKey`. Profiles and provider
+  hints come from the existing fixed MORNING/EVENING configurations.
+- Final candidates come from the Phase 7.1B.3 shared identity registry after
+  filtering, targeting, deterministic hard rejection/scoring, and
+  cross-source deduplication. No new score threshold or recommendation policy
+  is added.
+- The cap is enforced in payload validation, before repository persistence,
+  and again at the repository boundary. Stable source processing and registry
+  order determine selection.
+- Final database deduplication, selected job/score writes, and a completion
+  ledger row in the existing `activity_log` table occur in one SQLite
+  transaction. A completed idempotency key returns `ALREADY_COMPLETED` without
+  another write. No migration is introduced.
+- The persistent idempotency guarantee is local to the SQLite database and the
+  controlled task's concurrency-one queue. The activity ledger has no unique
+  database constraint, so unrelated writers that bypass this task/queue are
+  outside the guarantee. Trigger.dev task-level idempotency should also be
+  supplied by the caller.
+- Task retries are disabled (`maxAttempts: 1`), queue concurrency is one, and
+  the task retains the bounded 30-minute TTL / 600-second duration.
+- At the time of the Phase 7.1B.4A validation, applications, submissions,
+  resumes, cover letters, email, browsers, and LLMs were not part of this path.
+  The later uncommitted Phase 7.1B.4B work adds bounded requirements-only Gemini
+  enrichment before future controlled writes; it still adds no application
+  workflow.
+- The required one-time DEVELOPMENT validation completed through the actual
+  registered task as run `run_06fqk1omnhaft7a9ipea2iqc01` with status
+  `COMPLETED`. The MORNING profiles were `software_development` and
+  `ai_automation`. Across Arbeitnow, Remotive, and Lever, 136 records were
+  fetched; five authoritative persistence candidates were qualified and
+  selected, with no cap exclusions or final database duplicates.
+- The run persisted five jobs and one score: four established
+  `HARD_REJECTED` Remotive records and one scored `DISCOVERED` Lever record.
+  Copied-snapshot counts changed from 9 to 14 jobs, 6 to 7 scores, 0 to 0
+  applications, and 0 to 1 activity-log entries. No pre-existing job or score
+  row changed. The task reported zero applications and zero submissions.
+- The payload idempotency key and Trigger.dev task-level idempotency key were
+  both `phase-7-1b4a-20260729-023908107`; the persisted completion ledger
+  recorded the same five jobs, one score, and zero final duplicates. The task
+  was triggered exactly once and was not rerun.
+- Morning and evening recurring tasks remain `DEVELOPMENT`-only and
+  `DRY_RUN`-only. Production persistence remains disabled.
 
 ---
 

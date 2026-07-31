@@ -303,9 +303,9 @@ Development schedules trigger only while the Trigger.dev dev CLI is running, and
 the local PC must be running for those scheduled runs to execute. These schedules
 never enable persistence or application submission.
 
-Trigger.dev scheduled persistence remains deferred to a later phase. After
-schedule stability is reviewed, the next step is controlled scheduled
-persistence with explicit approval boundaries.
+Trigger.dev recurring scheduled persistence remains deferred. Phase 7.1B.4A
+adds a separate unscheduled controlled-persistence task; it does not change
+either cron task.
 
 ## Phase 7.1B.3 Job Search Profiles / Category-Aware Discovery
 
@@ -409,3 +409,138 @@ pre-filter registry work and this bounded matcher/immutable-summary fix. These
 deterministic changes are verified through automated matcher, runner,
 orchestration, adapter, dashboard, and schedule tests plus production builds;
 they are not represented as a replacement live provider run.
+
+## Phase 7.1B.4A Controlled persistence gate
+
+Task ID: `public-job-discovery-controlled-persistence`
+
+This manually triggered task has no cron schedule. The existing morning and
+evening tasks continue to call only `runPublicJobDiscoveryDryRun()` with fixed
+dry-run payloads.
+
+All independent persistence gates must pass before any provider fetch or
+database access:
+
+1. Trigger.dev environment type is `DEVELOPMENT`.
+2. Process-local `JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED` is exactly
+   `true`.
+3. The strict payload requests `persistenceMode: "CONTROLLED"`.
+4. `maxJobsToPersist` is an integer from 1 through 5.
+5. The executing task ID is the dedicated controlled-persistence task.
+
+The strict payload contains only `scheduleGroup`, `persistenceMode`,
+`maxJobsToPersist`, and a bounded `idempotencyKey`. It rejects unknown fields;
+callers cannot supply profiles, matcher rules, provider hosts, applications,
+submissions, documents, or secrets. MORNING always uses
+`software_development` plus `ai_automation` and its existing retrieval hints;
+EVENING uses the existing AI-augmented/low-code pair.
+
+Every source still runs through adapter validation, pre-filter shared identity
+registration, local filters, evidence-backed profile matching, deterministic
+hard rejection/scoring, and cross-source deduplication. Only the finalized
+registry persistence candidates are considered. The existing contract includes
+both scored `DISCOVERED` jobs and deterministic `HARD_REJECTED` records; this
+phase does not add a score threshold or change that established behavior.
+
+The candidate cap is enforced by Zod, before repository invocation, and again
+inside the repository. Selection follows stable source/registry order. The
+repository rechecks the live database with the existing canonical/semantic
+deduplication logic immediately before each insert.
+
+Selected job/score inserts and a completion record in the existing
+`activity_log` table are one SQLite transaction. A completed idempotency key
+returns `ALREADY_COMPLETED` and writes nothing. This provides persistent
+idempotency for serialized invocations through the concurrency-one controlled
+task. There is intentionally no migration or new unique constraint; unrelated
+concurrent writers that bypass the task queue remain outside this guarantee.
+Callers should additionally pass the same payload key as Trigger.dev's
+task-level idempotency key.
+
+The task has queue concurrency one, `maxAttempts: 1`, a 30-minute TTL, and a
+600-second maximum duration. A task failure is never automatically retried
+after an ambiguous persistence outcome. Partial provider success may still
+produce candidates from successful sources, but the selected database batch is
+atomic.
+
+Phase 7.1B.4A itself created no applications or submissions and originally had
+no Gemini/LLM dependency. Phase 7.1B.4B additively places one verified
+requirements-extraction call after final unique candidate selection and before
+future controlled writes. It remains bounded to at most five selected jobs,
+fails closed on extraction error, and still has no application, email, browser,
+resume, cover-letter, login, CAPTCHA, or form-submission dependency. Production
+and recurring scheduled persistence remain disabled.
+
+The required one-time DEVELOPMENT validation completed through the registered
+task as run `run_06fqk1omnhaft7a9ipea2iqc01` with status `COMPLETED`. The
+MORNING group activated `software_development` and `ai_automation`. Arbeitnow,
+Remotive, and Lever fetched 136 records in total; the finalized registry
+qualified five persistence candidates. All five were selected and persisted,
+one corresponding score was written, no candidate was skipped by the cap, and
+the final database write found zero duplicates.
+
+Copied SQLite snapshots verified the result without querying the live database:
+jobs changed from 9 to 14, job scores from 6 to 7, applications remained 0,
+and the activity log changed from 0 to 1 for the controlled-run completion
+ledger. No pre-existing job or score row changed. The task reported zero
+applications and zero submissions. The same bounded idempotency key,
+`phase-7-1b4a-20260729-023908107`, was used at both payload and Trigger.dev
+task level, and the task was triggered exactly once.
+
+This validation does not enable recurring writes. The morning and evening
+scheduled tasks remain `DEVELOPMENT`-only and `DRY_RUN`-only, and production
+persistence remains disabled.
+
+## Phase 7.1B.4B verified requirements enrichment
+
+The controlled-persistence order is now:
+
+1. fetch and provider validation;
+2. pre-filter shared identity registration;
+3. filters and evidence-backed profile matching;
+4. deterministic deduplication and persistence-candidate finalization;
+5. select at most five in stable registry order;
+6. deterministic requirement-candidate enumeration for each selected job;
+7. one server-only Gemini classification decision per candidate ID;
+8. strict Zod/ID-set parsing and independent exact-evidence verification;
+9. recompute only from individually verified facts;
+10. one atomic controlled write.
+
+Filtered, untargeted, duplicate, and unselected candidates never call Gemini.
+An extraction failure removes that selected candidate from the write batch and
+does not pull in a nondeterministic replacement. Existing scheduled morning and
+evening tasks remain dry-run-only.
+
+Gemini is a candidate classifier, not the source of truth. Deterministic code
+owns candidate evidence and explicit salary/experience numbers. The model must
+classify every supplied candidate ID exactly once and cannot add evidence or
+scalar values. Local code independently checks candidate-set equality,
+required/preferred cues, safe aliases, geographic restriction wording, and
+collaboration timezone wording. Only individually `VERIFIED` facts may
+influence scoring or hard rejection. Partial, conflict, and review facts remain
+visible but inert.
+
+The final Phase 7.1B.4B copied-snapshot validation and apply used the explicit
+primary `gemini-3.5-flash-lite` requirements model with no fallback. Spotify
+stores verified 3 years, USD 132949–189927 plus equity, North America, Eastern
+Standard Time, the complete required baseline concept list, and preferred
+data-engineering/Scala. The salary aggregate is `PARTIAL`, not `CONFLICT`,
+because the pay period is not stated.
+
+The accepted all-14 shadow produced 14 valid extraction results with zero
+unsupported accepted facts. The one all-or-nothing apply wrote all 14
+extractions, updated six score rows, removed PSA's score when verified expiry
+`2026-07-28` produced `EXPIRED`, and added one separate reprocessing activity
+entry. Final counts are 14 jobs, 6 scores, 0 applications, 2 activity entries,
+and 14 extraction rows. Existing hard-rejected jobs were not promoted; the
+garden3d salary and PSA employment conflicts did not affect automated
+decisions. A subsequent dry-run made 0 Gemini calls, skipped all 14 unchanged
+hashes, and wrote nothing.
+
+This completed local reprocessing does not enable discovery persistence on a
+schedule. Morning and evening tasks remain DEVELOPMENT-only and DRY_RUN-only,
+and production persistence remains disabled. Gemini is not treated as
+infallible: the guarantee is strict fail-closed verification, not perfect
+extraction accuracy.
+
+See `docs/JOB_REQUIREMENTS_EXTRACTION.md` for the detailed data model and
+verification contract.

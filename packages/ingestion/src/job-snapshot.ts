@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GovernmentSalaryReferenceSchema } from './government-enrichment.js';
+import { VerifiedJobRequirementsExtractionSchema } from './job-requirements-contracts.js';
 
 const SnapshotPipelineSchema = z
   .object({
@@ -20,6 +21,7 @@ export const StoredJobSnapshotSchema = z
     extraction: z.record(z.unknown()).default({}),
     pipeline: SnapshotPipelineSchema.optional(),
     government: GovernmentSalaryReferenceSchema.optional(),
+    verifiedRequirements: VerifiedJobRequirementsExtractionSchema.optional(),
   })
   .passthrough();
 

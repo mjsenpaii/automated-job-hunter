@@ -83,7 +83,8 @@ export function checkDuplicate(
     if (
       newJob.original_url &&
       existing.original_url &&
-      normalizeUrl(newJob.original_url) === normalizeUrl(existing.original_url)
+      canonicalizeJobUrl(newJob.original_url) ===
+        canonicalizeJobUrl(existing.original_url)
     ) {
       return {
         is_duplicate: true,
@@ -154,11 +155,52 @@ function normalizeTitle(title: string): string {
 }
 
 /** Normalize URL by removing protocol, www, trailing slashes, and query params */
-function normalizeUrl(url: string): string {
+const TRACKING_QUERY_PARAMETERS = new Set([
+  'fbclid',
+  'gclid',
+  'mc_cid',
+  'mc_eid',
+  'ref',
+  'referrer',
+  'source',
+  'utm_campaign',
+  'utm_content',
+  'utm_medium',
+  'utm_source',
+  'utm_term',
+]);
+
+/**
+ * Canonical URL identity shared by deduplication and extraction provenance.
+ *
+ * Meaningful provider/job identifiers remain in the query string. Only known
+ * tracking parameters are removed.
+ */
+export function canonicalizeJobUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    return `${parsed.hostname}${parsed.pathname}`.replace(/\/+$/, '').toLowerCase();
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return url.trim().toLowerCase().replace(/\/+$/, '');
+    }
+    parsed.hostname = parsed.hostname.toLowerCase();
+    for (const name of [...parsed.searchParams.keys()]) {
+      if (
+        TRACKING_QUERY_PARAMETERS.has(name.toLowerCase()) ||
+        name.toLowerCase().startsWith('utm_')
+      ) {
+        parsed.searchParams.delete(name);
+      }
+    }
+    parsed.hash = '';
+    parsed.pathname =
+      parsed.pathname === '/' ? '/' : parsed.pathname.replace(/\/+$/, '');
+    const query = [...parsed.searchParams.entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    parsed.search = '';
+    for (const [name, value] of query) parsed.searchParams.append(name, value);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}`;
   } catch {
-    return url.toLowerCase().replace(/\/+$/, '');
+    return url.trim().toLowerCase().replace(/\/+$/, '');
   }
 }

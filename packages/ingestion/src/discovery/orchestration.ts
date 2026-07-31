@@ -13,7 +13,11 @@ import {
   RemotiveDiscoveryError,
 } from '../adapters/remotive.js';
 import type {
+  ControlledDiscoveryRepository,
+  ControlledPersistenceIdempotencyStatus,
+  ControlledPersistenceWriteResult,
   DiscoveryPreview,
+  DiscoveryPersistenceRecord,
   DiscoveryCompanyFetchFailure,
   DiscoveryDeduplicationContext,
   DiscoveryProfileStats,
@@ -30,6 +34,7 @@ import {
 import { getScheduleRetrievalHints } from './profile-retrieval-hints.v1.js';
 import { resolveLeverCompanies } from './lever-selection.js';
 import {
+  createControlledDiscoveryRepositoryForRun,
   createDryRunRepositorySession,
   defaultDatabasePath,
   defaultSkillsPath,
@@ -41,6 +46,10 @@ import {
   runDiscovery,
   type DiscoveryIdentityFinalization,
 } from './runner.js';
+import {
+  enrichControlledPersistenceCandidate,
+  type DiscoveryRequirementsExtractor,
+} from '../controlled-job-requirements.js';
 
 const DEFAULT_LEVER_COMPANIES = ['spotify', 'highspot', 'aleph'] as const;
 
@@ -74,6 +83,112 @@ export const PublicJobDiscoveryDryRunPayloadSchema = z
 export type PublicJobDiscoveryDryRunPayload = z.infer<
   typeof PublicJobDiscoveryDryRunPayloadSchema
 >;
+
+export const CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID =
+  'public-job-discovery-controlled-persistence';
+export const CONTROLLED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH =
+  'JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED';
+
+export const ControlledPublicJobDiscoveryPayloadSchema = z
+  .object({
+    scheduleGroup: z.enum(['MORNING', 'EVENING']),
+    persistenceMode: z.literal('CONTROLLED'),
+    maxJobsToPersist: z.number().int().min(1).max(5),
+    idempotencyKey: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9._:-]*$/,
+        'Idempotency key contains unsupported characters.',
+      ),
+  })
+  .strict();
+export type ControlledPublicJobDiscoveryPayload = z.infer<
+  typeof ControlledPublicJobDiscoveryPayloadSchema
+>;
+
+export type ControlledPersistenceGateErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'NON_DEVELOPMENT_ENVIRONMENT'
+  | 'KILL_SWITCH_DISABLED'
+  | 'WRONG_TASK';
+
+export class ControlledPersistenceGateError extends Error {
+  constructor(
+    readonly code: ControlledPersistenceGateErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ControlledPersistenceGateError';
+  }
+}
+
+export const ControlledSourceFailureCodeSchema = z.enum([
+  'TIMEOUT',
+  'HTTP_ERROR',
+  'MALFORMED_JSON',
+  'SOURCE_SCHEMA_CHANGED',
+  'SERVICE_UNAVAILABLE',
+  'BOARD_UNAVAILABLE',
+  'INVALID_CONFIGURATION',
+  'ALL_BOARDS_FAILED',
+  'SOURCE_UNAVAILABLE',
+  'INVALID_RESPONSE',
+  'NETWORK_ERROR',
+  'UNKNOWN_SAFE_ERROR',
+]);
+export type ControlledSourceFailureCode = z.infer<
+  typeof ControlledSourceFailureCodeSchema
+>;
+
+export interface ControlledSourceFailure {
+  source: PublicJobDiscoverySourceName;
+  code: ControlledSourceFailureCode;
+  companyId?: string;
+}
+
+export interface ControlledPersistedJobPreview {
+  title: string;
+  company: string;
+  source: string;
+  matchedProfileIds: JobSearchProfileId[];
+  status: 'DISCOVERED' | 'HARD_REJECTED';
+  recommendation: string | null;
+}
+
+export interface ControlledPublicJobDiscoveryResult {
+  mode: 'CONTROLLED';
+  environment: 'DEVELOPMENT';
+  scheduleGroup: 'MORNING' | 'EVENING';
+  activeProfileIds: JobSearchProfileId[];
+  persistenceGates: {
+    developmentEnvironment: true;
+    killSwitchEnabled: true;
+    controlledPayloadApproved: true;
+  };
+  persistenceLimit: number;
+  idempotencyStatus: ControlledPersistenceIdempotencyStatus;
+  sources: Partial<
+    Record<PublicJobDiscoverySourceName, PublicJobDiscoverySourceResult>
+  >;
+  profileSummaries: PublicJobDiscoveryProfileSummary[];
+  combinedTotals: PublicJobDiscoveryCombinedTotals;
+  qualifiedBeforeCap: number;
+  skippedBecauseOfCap: number;
+  selectedForPersistence: number;
+  selectedAfterExtraction: number;
+  extractionFailed: number;
+  jobsPersisted: number;
+  scoresPersisted: number;
+  finalDatabaseDuplicates: number;
+  applicationsCreated: 0;
+  submissionsCreated: 0;
+  sourceFailures: ControlledSourceFailure[];
+  persistedJobs: ControlledPersistedJobPreview[];
+  persistenceEnabled: true;
+}
 
 export class PublicJobDiscoveryValidationError extends Error {
   constructor(message: string) {
@@ -175,6 +290,59 @@ export interface PublicJobDiscoveryDryRunDependencies {
   skillsPath?: string;
   now?: () => Date;
   onSourceStart?: (source: PublicJobDiscoverySourceName) => void;
+}
+
+export interface ControlledPublicJobDiscoveryDependencies
+  extends Omit<PublicJobDiscoveryDryRunDependencies, 'repository'> {
+  environmentType: string;
+  killSwitchEnabled: boolean;
+  taskId: string;
+  repository?: ControlledDiscoveryRepository;
+  requirementsExtractor?: DiscoveryRequirementsExtractor;
+}
+
+interface PublicJobDiscoveryEvaluation {
+  result: PublicJobDiscoveryDryRunResult;
+  finalization: DiscoveryIdentityFinalization;
+}
+
+const fixedDiscoveryBasePayload = {
+  arbeitnowEnabled: true,
+  remotiveEnabled: true,
+  leverEnabled: true,
+  query: '',
+  category: '',
+  remoteOnly: true,
+  arbeitnowLimit: 50,
+  remotiveLimit: 50,
+  leverLimit: 50,
+  leverCompanies: [...DEFAULT_LEVER_COMPANIES],
+} satisfies PublicJobDiscoveryDryRunPayload;
+
+export function fixedPublicJobDiscoveryPayloadForSchedule(
+  scheduleGroup: 'MORNING' | 'EVENING',
+): PublicJobDiscoveryDryRunPayload {
+  return scheduleGroup === 'MORNING'
+    ? {
+        ...fixedDiscoveryBasePayload,
+        scheduleGroup,
+        category: 'software-dev',
+        profileIds: ['software_development', 'ai_automation'],
+      }
+    : {
+        ...fixedDiscoveryBasePayload,
+        scheduleGroup,
+        profileIds: [
+          'ai_augmented_development',
+          'low_code_no_code',
+        ],
+      };
+}
+
+export function isControlledPersistenceKillSwitchEnabled(
+  value: string | undefined,
+): boolean {
+  return value === 'true';
 }
 
 function parsePayload(
@@ -551,26 +719,17 @@ async function runSourceDiscovery(
   });
 }
 
-export async function runPublicJobDiscoveryDryRun(
-  unvalidatedPayload: unknown,
-  dependencies: PublicJobDiscoveryDryRunDependencies = {},
-): Promise<PublicJobDiscoveryDryRunResult> {
-  const payload = parsePayload(unvalidatedPayload);
+async function evaluatePublicJobDiscovery(
+  payload: PublicJobDiscoveryDryRunPayload,
+  dependencies: PublicJobDiscoveryDryRunDependencies,
+  repository: DiscoveryRepository,
+): Promise<PublicJobDiscoveryEvaluation> {
   const activeProfileIds = resolveActiveProfileIds(payload);
   const retrievalHints = payload.scheduleGroup
     ? getScheduleRetrievalHints(payload.scheduleGroup)
     : null;
   const startedAt = (dependencies.now ?? (() => new Date()))().toISOString();
-  const databasePath =
-    dependencies.databasePath ?? defaultDatabasePath();
   const skillsPath = dependencies.skillsPath ?? defaultSkillsPath();
-  const dryRunSession = dependencies.repository
-    ? {
-        repository: dependencies.repository,
-        cleanup() {},
-      }
-    : createDryRunRepositorySession(databasePath);
-  const repository = dryRunSession.repository;
   const verifiedSkills =
     dependencies.verifiedSkills ?? loadVerifiedSkills(skillsPath);
   const fetchImpl = dependencies.fetchImpl ?? fetch;
@@ -582,10 +741,9 @@ export async function runPublicJobDiscoveryDryRun(
     Record<PublicJobDiscoverySourceName, DiscoveryRunSummary>
   > = {};
 
-  try {
-    const deduplicationContext: DiscoveryDeduplicationContext = {
-      knownJobs: [...(await repository.loadExistingJobs())],
-    };
+  const deduplicationContext: DiscoveryDeduplicationContext = {
+    knownJobs: [...(await repository.loadExistingJobs())],
+  };
     const sharedOptions = {
       remoteOnly: payload.remoteOnly,
       query: payload.query,
@@ -695,6 +853,7 @@ export async function runPublicJobDiscoveryDryRun(
     const completedAt = (dependencies.now ?? (() => new Date()))().toISOString();
 
     return {
+      result: {
       mode: 'DRY_RUN',
       startedAt,
       completedAt,
@@ -714,8 +873,286 @@ export async function runPublicJobDiscoveryDryRun(
       persistenceEnabled: false,
       applicationsCreated: 0,
       submissionsCreated: 0,
+      },
+      finalization,
     };
+}
+
+export async function runPublicJobDiscoveryDryRun(
+  unvalidatedPayload: unknown,
+  dependencies: PublicJobDiscoveryDryRunDependencies = {},
+): Promise<PublicJobDiscoveryDryRunResult> {
+  const payload = parsePayload(unvalidatedPayload);
+  const databasePath =
+    dependencies.databasePath ?? defaultDatabasePath();
+  const dryRunSession = dependencies.repository
+    ? {
+        repository: dependencies.repository,
+        cleanup() {},
+      }
+    : createDryRunRepositorySession(databasePath);
+  try {
+    return (
+      await evaluatePublicJobDiscovery(
+        payload,
+        dependencies,
+        dryRunSession.repository,
+      )
+    ).result;
   } finally {
     dryRunSession.cleanup();
   }
+}
+
+function controlledSourceFailureCode(
+  value: string,
+): ControlledSourceFailureCode {
+  const parsed = ControlledSourceFailureCodeSchema.safeParse(value);
+  return parsed.success ? parsed.data : 'UNKNOWN_SAFE_ERROR';
+}
+
+function collectControlledSourceFailures(
+  sources: ControlledPublicJobDiscoveryResult['sources'],
+): ControlledSourceFailure[] {
+  const failures: ControlledSourceFailure[] = [];
+  for (const sourceName of [
+    'arbeitnow',
+    'remotive',
+    'lever',
+  ] as const) {
+    const source = sources[sourceName];
+    if (!source) continue;
+    if (source.error) {
+      failures.push({
+        source: sourceName,
+        code: controlledSourceFailureCode(source.error.code),
+      });
+    }
+    for (const failure of source.failedCompanies ?? []) {
+      failures.push({
+        source: sourceName,
+        companyId: failure.companyId,
+        code: controlledSourceFailureCode(failure.errorCode),
+      });
+    }
+  }
+  return failures;
+}
+
+function sourceNameKey(
+  sourceName: string,
+): PublicJobDiscoverySourceName | null {
+  const normalized = sourceName.trim().toLowerCase();
+  if (normalized.includes('arbeitnow')) return 'arbeitnow';
+  if (normalized.includes('remotive')) return 'remotive';
+  if (normalized.includes('lever')) return 'lever';
+  return null;
+}
+
+function sanitizeControlledSources(
+  sources: PublicJobDiscoveryDryRunResult['sources'],
+): ControlledPublicJobDiscoveryResult['sources'] {
+  const sanitized: ControlledPublicJobDiscoveryResult['sources'] = {};
+  for (const sourceName of [
+    'arbeitnow',
+    'remotive',
+    'lever',
+  ] as const) {
+    const source = sources[sourceName];
+    if (source) {
+      const { error: _internalError, ...safeSource } = source;
+      sanitized[sourceName] = {
+        ...safeSource,
+        preview: source.preview.map((preview) => ({
+          ...preview,
+          additionalSourceNames: [
+            ...preview.additionalSourceNames,
+          ],
+          matchedProfileIds: [...preview.matchedProfileIds],
+          matchedProfileEvidence:
+            preview.matchedProfileEvidence.map((match) => ({
+              profileId: match.profileId,
+              evidence: match.evidence.map((item) => ({ ...item })),
+            })),
+        })),
+      };
+    }
+  }
+  return sanitized;
+}
+
+function controlledPersistedPreview(
+  record: ControlledPersistenceWriteResult['persistedRecords'][number],
+): ControlledPersistedJobPreview {
+  return {
+    title: record.discovered.title,
+    company: record.discovered.company,
+    source: record.discovered.sourceName,
+    matchedProfileIds: [...record.matchedProfileIds],
+    status: record.persistedStatus,
+    recommendation: record.result.recommendation ?? null,
+  };
+}
+
+export async function runControlledPublicJobDiscovery(
+  unvalidatedPayload: unknown,
+  dependencies: ControlledPublicJobDiscoveryDependencies,
+): Promise<ControlledPublicJobDiscoveryResult> {
+  const parsed = ControlledPublicJobDiscoveryPayloadSchema.safeParse(
+    unvalidatedPayload,
+  );
+  if (!parsed.success) {
+    throw new ControlledPersistenceGateError(
+      'INVALID_PAYLOAD',
+      parsed.error.issues[0]?.message ??
+        'Invalid controlled discovery payload.',
+    );
+  }
+  if (dependencies.taskId !== CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID) {
+    throw new ControlledPersistenceGateError(
+      'WRONG_TASK',
+      'Controlled persistence is available only from its dedicated task.',
+    );
+  }
+  if (dependencies.environmentType !== 'DEVELOPMENT') {
+    throw new ControlledPersistenceGateError(
+      'NON_DEVELOPMENT_ENVIRONMENT',
+      'Controlled persistence is restricted to DEVELOPMENT.',
+    );
+  }
+  if (!dependencies.killSwitchEnabled) {
+    throw new ControlledPersistenceGateError(
+      'KILL_SWITCH_DISABLED',
+      'Controlled persistence is disabled.',
+    );
+  }
+
+  const payload = parsed.data;
+  const discoveryPayload = fixedPublicJobDiscoveryPayloadForSchedule(
+    payload.scheduleGroup,
+  );
+  const databasePath =
+    dependencies.databasePath ?? defaultDatabasePath();
+  const repository =
+    dependencies.repository ??
+    createControlledDiscoveryRepositoryForRun(databasePath);
+  const evaluation = await evaluatePublicJobDiscovery(
+    discoveryPayload,
+    dependencies,
+    repository,
+  );
+  const qualifiedBeforeCap =
+    evaluation.finalization.persistenceCandidates.length;
+  const selected = evaluation.finalization.persistenceCandidates.slice(
+    0,
+    payload.maxJobsToPersist,
+  );
+  const verifiedSkills =
+    dependencies.verifiedSkills ??
+    loadVerifiedSkills(dependencies.skillsPath ?? defaultSkillsPath());
+  const enrichedSelected: DiscoveryPersistenceRecord[] = [];
+  let extractionFailed = 0;
+  for (const record of selected) {
+    try {
+      enrichedSelected.push(
+        await enrichControlledPersistenceCandidate(
+          record,
+          verifiedSkills,
+          dependencies.requirementsExtractor,
+        ),
+      );
+    } catch {
+      extractionFailed += 1;
+    }
+  }
+  const writeResult = await repository.persistControlledBatch(enrichedSelected, {
+    idempotencyKey: payload.idempotencyKey,
+    maxJobsToPersist: payload.maxJobsToPersist,
+  });
+
+  const sourceFailures = collectControlledSourceFailures(
+    evaluation.result.sources,
+  );
+  const sources = sanitizeControlledSources(evaluation.result.sources);
+  for (const source of Object.values(sources)) {
+    if (source) source.jobsPersisted = 0;
+  }
+  for (const record of writeResult.persistedRecords) {
+    const sourceKey = sourceNameKey(record.discovered.sourceName);
+    const source = sourceKey ? sources[sourceKey] : undefined;
+    if (source) source.jobsPersisted += 1;
+  }
+  const combinedTotals = {
+    ...evaluation.result.combinedTotals,
+    jobsPersisted: writeResult.jobsPersisted,
+  };
+
+  return {
+    mode: 'CONTROLLED',
+    environment: 'DEVELOPMENT',
+    scheduleGroup: payload.scheduleGroup,
+    activeProfileIds: [...evaluation.result.activeProfileIds],
+    persistenceGates: {
+      developmentEnvironment: true,
+      killSwitchEnabled: true,
+      controlledPayloadApproved: true,
+    },
+    persistenceLimit: payload.maxJobsToPersist,
+    idempotencyStatus: writeResult.idempotencyStatus,
+    sources,
+    profileSummaries: evaluation.result.profileSummaries,
+    combinedTotals,
+    qualifiedBeforeCap,
+    skippedBecauseOfCap: Math.max(
+      0,
+      qualifiedBeforeCap - selected.length,
+    ),
+    selectedForPersistence: selected.length,
+    selectedAfterExtraction: enrichedSelected.length,
+    extractionFailed,
+    jobsPersisted: writeResult.jobsPersisted,
+    scoresPersisted: writeResult.scoresPersisted,
+    finalDatabaseDuplicates:
+      writeResult.finalDatabaseDuplicates,
+    applicationsCreated: 0,
+    submissionsCreated: 0,
+    sourceFailures,
+    persistedJobs: writeResult.persistedRecords
+      .slice(0, 5)
+      .map(controlledPersistedPreview),
+    persistenceEnabled: true,
+  };
+}
+
+export function formatControlledPublicJobDiscoveryForLog(
+  result: ControlledPublicJobDiscoveryResult,
+): string {
+  return [
+    `Public job discovery ${result.mode}`,
+    `Environment: ${result.environment}`,
+    `Schedule group: ${result.scheduleGroup}`,
+    `Active profiles: ${result.activeProfileIds.join(', ')}`,
+    `Persistence limit: ${result.persistenceLimit}`,
+    `Idempotency status: ${result.idempotencyStatus}`,
+    `Qualified before cap: ${result.qualifiedBeforeCap}`,
+    `Skipped because of cap: ${result.skippedBecauseOfCap}`,
+    `Selected for persistence: ${result.selectedForPersistence}`,
+    `Selected after verified extraction: ${result.selectedAfterExtraction}`,
+    `Extraction failed: ${result.extractionFailed}`,
+    `Jobs persisted: ${result.jobsPersisted}`,
+    `Scores persisted: ${result.scoresPersisted}`,
+    `Final database duplicates: ${result.finalDatabaseDuplicates}`,
+    `Applications created: ${result.applicationsCreated}`,
+    `Submissions created: ${result.submissionsCreated}`,
+    `Source failures: ${result.sourceFailures
+      .map(
+        (failure) =>
+          `${failure.source}${failure.companyId ? `/${failure.companyId}` : ''}:${failure.code}`,
+      )
+      .join(', ')}`,
+    ...result.persistedJobs.map(
+      (job, index) =>
+        `${index + 1}. [${job.status}] ${job.title} — ${job.company} | ${job.source} | ${job.matchedProfileIds.join(', ')} | ${job.recommendation ?? 'No recommendation'}`,
+    ),
+  ].join('\n');
 }

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { NormalizedJob } from '@job-app/core';
 import { getDb } from '@job-app/db/connection';
-import { jobs, job_scores } from '@job-app/db/schema';
+import { job_extractions, jobs, job_scores } from '@job-app/db/schema';
 import type { IngestionResult } from './types.js';
+import type { VerifiedJobRequirementsExtraction } from './job-requirements-contracts.js';
 
 export type JobDatabase = ReturnType<typeof getDb>;
 
@@ -26,6 +27,7 @@ export interface PersistedJobMetadata {
   civilServiceEligibility?: string | null;
   scheduleNotes?: string[];
   governmentScope?: string | null;
+  verifiedExtraction?: VerifiedJobRequirementsExtraction;
 }
 
 export interface PersistableIngestionResult {
@@ -56,7 +58,7 @@ function requirePersistableNormalizedJob(
   return result.normalized_job;
 }
 
-function insertOne(
+export function insertPersistableIngestionResult(
   database: Pick<JobDatabase, 'insert'>,
   record: PersistableIngestionResult,
 ): void {
@@ -139,6 +141,22 @@ function insertOne(
       })
       .run();
   }
+
+  if (metadata.verifiedExtraction) {
+    const extraction = metadata.verifiedExtraction;
+    database
+      .insert(job_extractions)
+      .values({
+        job_id: normalized.id,
+        schema_version: extraction.schemaVersion,
+        content_hash: extraction.contentHash,
+        model_identifier: extraction.modelIdentifier,
+        verification_status: extraction.extractionStatus,
+        structured_json: JSON.stringify(extraction),
+        extracted_at: extraction.extractedAt,
+      })
+      .run();
+  }
 }
 
 /**
@@ -153,7 +171,7 @@ export function persistIngestionResults(
 ): void {
   database.transaction((transaction) => {
     for (const record of records) {
-      insertOne(transaction, record);
+      insertPersistableIngestionResult(transaction, record);
     }
   });
 }

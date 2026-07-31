@@ -48,6 +48,7 @@ export function checkEligibility(
   job: NormalizedJob,
   category: JobCategory,
   workSetup: WorkSetup,
+  options: { verifiedRestrictionsOnly?: boolean } = {},
 ): EligibilityResult {
   // PH jobs — generally eligible, but may need location review
   if (category === 'PH') {
@@ -72,7 +73,9 @@ export function checkEligibility(
   const allowedCountries = job.allowed_countries.map((c) => c.toLowerCase());
   const allowedRegions = job.allowed_regions.map((r) => r.toLowerCase());
   const eligibilityText = (job.eligibility_text ?? '').toLowerCase();
-  const description = job.description.toLowerCase();
+  const description = options.verifiedRestrictionsOnly
+    ? ''
+    : job.description.toLowerCase();
 
   // Check combined text for explicit inclusion
   const combinedText = [...allowedCountries, ...allowedRegions, eligibilityText, description].join(' ');

@@ -7,6 +7,8 @@ import {
   GovernmentSalaryReferenceSchema,
   persistedJobToNormalized,
   persistIngestionResults,
+  recomputeIngestionWithVerifiedRequirements,
+  reconcileVerifiedExtractionWithProvider,
   toJobImportResult,
   type ApiError,
   type ConfirmScoreRequest,
@@ -131,7 +133,7 @@ export async function processAndPersistImportedJob(
   const db = getDatabase();
   const existingRows = await db.select().from(jobs);
   const existingJobs = existingRows.map(toNormalizedForDedupe);
-  const result = await ingestJob(raw, existingJobs, getVerifiedSkills());
+  let result = await ingestJob(raw, existingJobs, getVerifiedSkills());
 
   if (result.status === 'ERROR') {
     return {
@@ -146,6 +148,25 @@ export async function processAndPersistImportedJob(
       job_id: result.job_id,
       duplicate_of_id: result.duplicate_of_id,
     });
+  }
+
+  let verifiedRequirements = data.verified_requirements;
+  if (verifiedRequirements && result.normalized_job) {
+    verifiedRequirements = reconcileVerifiedExtractionWithProvider(
+      verifiedRequirements,
+      {
+        salaryMin: data.salary_min,
+        salaryMax: data.salary_max,
+        salaryCurrency: data.salary_currency,
+        workSetup: data.work_setup,
+        employmentType: data.employment_type,
+      },
+    );
+    result = recomputeIngestionWithVerifiedRequirements(
+      result.normalized_job,
+      verifiedRequirements,
+      getVerifiedSkills(),
+    );
   }
 
   const normalized = result.normalized_job;
@@ -170,7 +191,7 @@ export async function processAndPersistImportedJob(
   const salaryReference =
     GovernmentSalaryReferenceSchema.parse(enrichedGovernment);
   const snapshot = JSON.stringify({
-    version: 2,
+    version: verifiedRequirements ? 3 : 2,
     source: 'unified-import',
     extraction: data,
     government: salaryReference,
@@ -178,6 +199,7 @@ export async function processAndPersistImportedJob(
       status: result.status,
       rejectionReasons: actualReasons,
     },
+    ...(verifiedRequirements ? { verifiedRequirements } : {}),
   });
 
   persistIngestionResults(db, [
@@ -210,6 +232,7 @@ export async function processAndPersistImportedJob(
           data.civil_service_eligibility?.trim() || null,
         scheduleNotes: data.schedule_notes,
         governmentScope: data.government_scope ?? null,
+        verifiedExtraction: verifiedRequirements,
       },
     },
   ]);

@@ -3,8 +3,9 @@ import {
   cleanJobContent,
   parseStoredJobSnapshot,
 } from '@job-app/ingestion';
+import { VerifiedJobRequirementsExtractionSchema } from '@job-app/ingestion/job-requirements-contracts';
 import { checkHardReject } from '@job-app/scoring';
-import { jobs, job_scores } from '@job-app/db/schema';
+import { job_extractions, jobs, job_scores } from '@job-app/db/schema';
 import { EmptyState } from '@/components/EmptyState';
 import {
   JobDetailWorkspace,
@@ -118,6 +119,23 @@ export default async function JobDetailPage({
         actionHref="/"
       />
     );
+  }
+
+  const extractionRows = await db
+    .select()
+    .from(job_extractions)
+    .where(eq(job_extractions.job_id, id))
+    .limit(1);
+  let verifiedRequirements = null;
+  if (extractionRows[0]) {
+    try {
+      const parsed = VerifiedJobRequirementsExtractionSchema.safeParse(
+        JSON.parse(extractionRows[0].structured_json),
+      );
+      if (parsed.success) verifiedRequirements = parsed.data;
+    } catch {
+      verifiedRequirements = null;
+    }
   }
 
   const snapshot = safeParseRecord(row.job.raw_snapshot);
@@ -286,6 +304,7 @@ export default async function JobDetailPage({
     rejectionReasonRecorded: rejectionReasons.length > 0,
     rawSource,
     score,
+    verifiedRequirements,
   };
 
   return <JobDetailWorkspace job={detail} />;

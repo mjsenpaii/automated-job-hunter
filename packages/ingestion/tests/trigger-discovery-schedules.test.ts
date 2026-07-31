@@ -5,6 +5,7 @@ import {
   fixedEveningPublicJobDiscoveryDryRunPayload,
   fixedMorningPublicJobDiscoveryDryRunPayload,
 } from "../../../src/trigger/public-job-discovery-shared";
+import { fixedPublicJobDiscoveryPayloadForSchedule } from "../src/discovery/orchestration.js";
 
 const scheduledTaskFile = path.resolve(
   __dirname,
@@ -17,6 +18,10 @@ const sharedFile = path.resolve(
 const manualTaskFile = path.resolve(
   __dirname,
   "../../../src/trigger/public-job-discovery-dry-run.ts",
+);
+const controlledTaskFile = path.resolve(
+  __dirname,
+  "../../../src/trigger/public-job-discovery-controlled-persistence.ts",
 );
 
 function source(filePath: string): string {
@@ -114,6 +119,35 @@ describe("Trigger.dev discovery schedules", () => {
     expect(shared).not.toMatch(/--apply|apply:\s*true|persistBatch|applicationsCreated:\s*[1-9]/);
   });
 
+  it("keeps both recurring schedules dry-run-only and payload-independent", () => {
+    const scheduled = source(scheduledTaskFile);
+    expect(scheduled).toContain(
+      'runScheduledPublicJobDiscoveryDryRun("MORNING", payload)',
+    );
+    expect(scheduled).toContain(
+      'runScheduledPublicJobDiscoveryDryRun("EVENING", payload)',
+    );
+    expect(scheduled).not.toMatch(
+      /CONTROLLED|runControlledPublicJobDiscovery|process\.env|persistControlledBatch/,
+    );
+  });
+
+  it("defines a separate unscheduled controlled task with one attempt", () => {
+    const controlled = source(controlledTaskFile);
+    expect(controlled).toContain(
+      "CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID",
+    );
+    expect(controlled).toContain("queue: publicJobDiscoveryQueue");
+    expect(controlled).toContain("maxAttempts: 1");
+    expect(controlled).toContain('ttl: "30m"');
+    expect(controlled).toContain("maxDuration: 600");
+    expect(controlled).toContain("ctx.environment.type");
+    expect(controlled).toContain(
+      "CONTROLLED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH",
+    );
+    expect(controlled).not.toMatch(/schedules\.task|cron:/);
+  });
+
   it("uses different intended retrieval hints by schedule group", () => {
     expect(fixedMorningPublicJobDiscoveryDryRunPayload.category).toBe(
       "software-dev",
@@ -122,6 +156,15 @@ describe("Trigger.dev discovery schedules", () => {
     expect(fixedMorningPublicJobDiscoveryDryRunPayload.profileIds).not.toEqual(
       fixedEveningPublicJobDiscoveryDryRunPayload.profileIds,
     );
+  });
+
+  it("keeps controlled schedule-group discovery inputs in parity with cron inputs", () => {
+    expect(
+      fixedPublicJobDiscoveryPayloadForSchedule("MORNING"),
+    ).toEqual(fixedMorningPublicJobDiscoveryDryRunPayload);
+    expect(
+      fixedPublicJobDiscoveryPayloadForSchedule("EVENING"),
+    ).toEqual(fixedEveningPublicJobDiscoveryDryRunPayload);
   });
 
   it("retains temporary snapshot safety boundary", () => {

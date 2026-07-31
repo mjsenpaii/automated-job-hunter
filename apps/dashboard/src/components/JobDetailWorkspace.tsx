@@ -7,6 +7,7 @@ import { AppIcon } from './icons';
 import { JobExportActions } from './JobExportActions';
 import { JobProfileBadges } from './JobProfileBadges';
 import StatusBadge from './StatusBadge';
+import { VerifiedRequirementsSummary } from './VerifiedRequirementsSummary';
 
 type DetailTab =
   | 'overview'
@@ -314,6 +315,13 @@ export function JobDetailWorkspace({ job }: { job: JobDetailData }) {
 
             {tab === 'requirements' && (
               <div className="detail-two-column">
+                {job.verifiedRequirements && (
+                  <div className="detail-full-width">
+                    <VerifiedRequirementsSummary
+                      extraction={job.verifiedRequirements}
+                    />
+                  </div>
+                )}
                 <section className="detail-section">
                   <h2>Requirements</h2>
                   <BulletList items={job.requirements} empty="No separate requirements were extracted." />

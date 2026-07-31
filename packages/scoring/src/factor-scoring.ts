@@ -29,6 +29,7 @@ interface ScoringInput {
   verifiedSkills: SkillEntry[];
   eligibilityStatus: EligibilityStatus;
   workSetup: WorkSetup;
+  verifiedRequirementsOnly?: boolean;
 }
 
 /**
@@ -97,7 +98,7 @@ export function scoreJob(input: ScoringInput): StructuredScore {
   let technicalMatch = 0;
   if (allJobSkills.length > 0) {
     technicalMatch = Math.round((matchedSkills.length / allJobSkills.length) * 25);
-  } else {
+  } else if (!input.verifiedRequirementsOnly) {
     // No skills listed — check description for verified skill mentions
     const descMatches = verifiedSkillNames.filter((vs) => text.includes(vs));
     technicalMatch = Math.min(descMatches.length * 5, 20);

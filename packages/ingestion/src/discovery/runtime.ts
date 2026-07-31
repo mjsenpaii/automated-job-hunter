@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import type { SkillEntry } from '@job-app/core';
 import { getDb, getReadonlyDb, openReadonlyDatabaseSession } from '@job-app/db/connection';
 import { z } from 'zod';
-import type { DiscoveryOptions, DiscoveryRepository } from './contracts.js';
+import type {
+  ControlledDiscoveryRepository,
+  DiscoveryOptions,
+  DiscoveryRepository,
+} from './contracts.js';
 import { createDiscoveryRepository } from './repository.js';
 
 export const DISCOVERY_REPOSITORY_ROOT = path.resolve(
@@ -89,6 +93,12 @@ export function createDiscoveryRepositoryForRun(
     };
   }
   return createDiscoveryRepository(getReadonlyDb(databasePath));
+}
+
+export function createControlledDiscoveryRepositoryForRun(
+  databasePath: string,
+): ControlledDiscoveryRepository {
+  return createDiscoveryRepository(getDb(databasePath));
 }
 
 export function copyDatabaseSnapshot(

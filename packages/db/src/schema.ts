@@ -79,6 +79,27 @@ export const job_scores = sqliteTable('job_scores', {
   };
 });
 
+export const job_extractions = sqliteTable('job_extractions', {
+  job_id: text('job_id')
+    .primaryKey()
+    .references(() => jobs.id),
+  schema_version: integer('schema_version').notNull(),
+  content_hash: text('content_hash').notNull(),
+  model_identifier: text('model_identifier').notNull(),
+  verification_status: text('verification_status').notNull(),
+  structured_json: text('structured_json').notNull(),
+  extracted_at: text('extracted_at').notNull(),
+  created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  contentHashIdx: index('job_extractions_content_hash_idx').on(
+    table.content_hash,
+  ),
+  statusIdx: index('job_extractions_status_idx').on(
+    table.verification_status,
+  ),
+}));
+
 export const applications = sqliteTable('applications', {
   id: text('id').primaryKey(),
   job_id: text('job_id').notNull().references(() => jobs.id),

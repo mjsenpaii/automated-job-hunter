@@ -3,6 +3,7 @@
 import type {
   EnrichedGeminiJobExtraction,
 } from '@job-app/ingestion/gemini-contracts';
+import type { VerifiedJobRequirementsExtraction } from '@job-app/ingestion/job-requirements-contracts';
 import {
   ListField,
   nullableNumber,
@@ -10,20 +11,26 @@ import {
   TextField,
   type ExtractionFieldSetter,
 } from './ExtractionControls';
+import { VerifiedRequirementsSummary } from './VerifiedRequirementsSummary';
 
 export function RequirementsReview({
   id,
   extraction,
   editing,
   set,
+  verifiedRequirements,
 }: {
   id: string;
   extraction: EnrichedGeminiJobExtraction;
   editing: boolean;
   set: ExtractionFieldSetter;
+  verifiedRequirements: VerifiedJobRequirementsExtraction | null;
 }) {
   return (
     <div className="review-sections">
+      {verifiedRequirements && (
+        <VerifiedRequirementsSummary extraction={verifiedRequirements} />
+      )}
       <details open>
         <summary>Description</summary>
         <div className="field details-field">

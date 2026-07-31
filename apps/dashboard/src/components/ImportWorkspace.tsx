@@ -7,6 +7,7 @@ import {
   type EnrichedGeminiJobExtraction,
   type GeminiExtractionMetadata,
 } from '@job-app/ingestion/gemini-contracts';
+import type { VerifiedJobRequirementsExtraction } from '@job-app/ingestion/job-requirements-contracts';
 import {
   parseJobImportResponse,
   validateConfirmScoreRequest,
@@ -22,6 +23,8 @@ export function ImportWorkspace() {
   const [extraction, setExtraction] =
     useState<EnrichedGeminiJobExtraction | null>(null);
   const [metadata, setMetadata] = useState<GeminiExtractionMetadata | null>(null);
+  const [verifiedRequirements, setVerifiedRequirements] =
+    useState<VerifiedJobRequirementsExtraction | null>(null);
   const [analysing, setAnalysing] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -65,6 +68,7 @@ export function ImportWorkspace() {
         fallbackReason: parsed.data.fallbackReason,
         confidence: parsed.data.confidence,
       });
+      setVerifiedRequirements(parsed.data.verifiedRequirements);
       setWarnings(parsed.data.warnings);
       setEditing(false);
     } catch (caught) {
@@ -84,7 +88,11 @@ export function ImportWorkspace() {
     if (!extraction || scoring) return;
     setError(null);
     const validation = validateConfirmScoreRequest(
-      extractionToConfirmPayload(extraction, metadata ?? undefined),
+      extractionToConfirmPayload(
+        extraction,
+        metadata ?? undefined,
+        verifiedRequirements ?? undefined,
+      ),
     );
     if (!validation.ok) {
       setError(validation.message);
@@ -121,6 +129,7 @@ export function ImportWorkspace() {
     setInput('');
     setExtraction(null);
     setMetadata(null);
+    setVerifiedRequirements(null);
     setAnalysing(false);
     setScoring(false);
     setEditing(false);
@@ -198,6 +207,7 @@ export function ImportWorkspace() {
           extraction={extraction}
           originalContent={input}
           metadata={metadata}
+          verifiedRequirements={verifiedRequirements}
           editing={editing}
           scoring={scoring}
           result={result}

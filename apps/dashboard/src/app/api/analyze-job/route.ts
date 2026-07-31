@@ -11,6 +11,10 @@ import {
   GeminiExtractionError,
 } from '@/lib/gemini/job-extractor';
 import {
+  extractVerifiedJobRequirements,
+  GeminiJobRequirementsError,
+} from '@job-app/ingestion/gemini-requirements-server';
+import {
   prepareJobInput,
   JobInputPreparationError,
 } from '@/lib/gemini/prepare-job-input';
@@ -60,6 +64,21 @@ export async function POST(request: Request) {
   try {
     const prepared = await prepareJobInput(parsed.data.input);
     const result = await extractJobWithGemini(prepared);
+    const verifiedRequirements = await extractVerifiedJobRequirements({
+      title: result.extraction.title ?? '',
+      company: result.extraction.company ?? '',
+      rawDescription: prepared.content,
+      providerMetadata: {
+        sourceName: result.extraction.sourceSite,
+        originalUrl: prepared.sourceUrl,
+        country: result.extraction.country,
+        workSetup: result.extraction.workSetup,
+        employmentType: result.extraction.employmentType,
+        salaryText: result.extraction.salaryText,
+        location: result.extraction.location,
+        tags: result.extraction.skills,
+      },
+    });
     const extraction = enrichGeminiJobExtraction(
       normalizeGeminiExtraction({
         ...result.extraction,
@@ -68,9 +87,7 @@ export async function POST(request: Request) {
           prepared.sourceUrl && !result.extraction.sourceSite
             ? new URL(prepared.sourceUrl).hostname.replace(/^www\./, '')
             : result.extraction.sourceSite,
-        description: result.extraction.description
-          ? cleanJobContent(result.extraction.description)
-          : null,
+        description: cleanJobContent(prepared.content),
       }),
     );
 
@@ -83,6 +100,7 @@ export async function POST(request: Request) {
       confidence: extraction.confidence,
       inputKind: prepared.inputKind,
       warnings: prepared.warnings,
+      verifiedRequirements,
     });
   } catch (error) {
     if (error instanceof JobInputPreparationError) {
@@ -94,6 +112,20 @@ export async function POST(request: Request) {
       return NextResponse.json(apiError(error.code, error.message), {
         status: statusForGeminiError(error),
       });
+    }
+    if (error instanceof GeminiJobRequirementsError) {
+      const status =
+        error.code === 'MODEL_RATE_LIMITED'
+          ? 429
+          : error.code === 'MODEL_TIMEOUT'
+            ? 504
+            : error.code === 'MODEL_OUTPUT_INVALID'
+              ? 422
+              : 503;
+      return NextResponse.json(
+        apiError(error.code, 'Verified requirement extraction failed safely.'),
+        { status },
+      );
     }
     return NextResponse.json(
       apiError('INTERNAL_ERROR', 'Unable to analyse this job right now. Try again.'),

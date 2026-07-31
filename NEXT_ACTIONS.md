@@ -1,11 +1,55 @@
 # Next Actions
 
-**Last updated:** 2026-07-29 PHT
-**Current state:** Phase 7.1B.3 category-aware discovery has a bounded deterministic matcher and immutable source-summary snapshots implemented locally, but it still awaits final acceptance review. Primary role evidence is limited to explicit profile-specific technical titles or a closed, applicant-attributed action/object grammar inside one description clause. Every valid adapter candidate enters the shared identity registry before local filters; filtered or untargeted variants may be promoted by a later targeted duplicate without duplicate scoring. Lever boards have independent failure boundaries. Morning/evening schedules remain `DEVELOPMENT`-only and dry-run-only.
+**Last updated:** 2026-08-01 PHT
+**Current state:** Phase 7.1B.4A-B is complete. The controlled DEVELOPMENT run persisted five bounded discovery candidates, and the single all-or-nothing existing-job reprocessing apply stored 14 verified extraction records. Current counts are jobs 14, scores 6, applications 0, activity 2, and job extractions 14. Spotify stores `Eastern Standard Time`; the unchanged-hash dry-run made 0 Gemini calls and 0 writes. Recurring schedules remain DEVELOPMENT-only/DRY_RUN-only and production persistence remains disabled.
 
 ---
 
-## Review this implementation
+## Preserve the completed Phase 7.1B.4B boundary
+
+1. Review `docs/JOB_REQUIREMENTS_EXTRACTION.md` before changing extraction or
+   verification behavior.
+2. Preserve candidate-set equality, deterministic scalar authority, exact
+   evidence, and field-level status checks. Do not add company-name rules or
+   accept an unsupported annual period.
+3. Preserve strict Zod/candidate-ID validation and fail closed on malformed,
+   incomplete, conflicting, or unsupported model output.
+4. Do not repeat the completed 14-job apply. Unchanged content is already
+   protected by versioned content hashes.
+5. Any future reprocessing apply requires new explicit authorization, an
+   external backup, shadow review, and atomic reconciliation.
+
+## Preserve Phase 7.1B.4B safety boundaries
+
+1. Keep Gemini server-only and requirements extraction on the explicit
+   configured primary Flash-Lite slot. Do not silently switch this path to the
+   fallback model.
+2. Only `VERIFIED` facts may affect scoring, eligibility, or hard rejection.
+   `MISSING`, `REQUIRES_REVIEW`, `PARTIAL`, `CONFLICT`, and
+   `EXTRACTION_FAILED` remain fail-closed.
+3. Controlled discovery may call requirements extraction only for the final
+   unique selected candidates, at most five per run. Filtered, untargeted,
+   duplicate, and replacement candidates must not add calls.
+4. Do not trigger discovery or Trigger.dev to validate this reprocessing work.
+5. Do not create applications, submissions, resumes, cover letters, messages,
+   emails, or browser automation.
+
+---
+
+## Preserve the completed Phase 7.1B.4A validation
+
+1. Review the completed registered validation run
+   `run_06fqk1omnhaft7a9ipea2iqc01` and its copied-snapshot reconciliation:
+   jobs 9→14, scores 6→7, applications 0→0, and activity log 0→1.
+2. Preserve the verified one-run boundary. Do not rerun the controlled task to
+   force different source, scoring, or persistence outcomes.
+3. Keep the controlled-persistence kill switch disabled outside an explicitly
+   authorized DEVELOPMENT validation process. Do not persist it in an env file.
+4. Keep production persistence and recurring scheduled persistence disabled.
+5. Do not convert the controlled task into a recurring or production write
+   path without a separately reviewed phase.
+
+## Existing implementation review references
 
 1. Review the Phase 7.1A/7.1A.2/7.1A.3 architecture and source-compliance notes in
    `docs/PUBLIC_JOB_DISCOVERY.md` and `docs/SOURCE_COMPLIANCE.md`.
@@ -48,10 +92,9 @@
    pnpm discovery:lever -- --company spotify --company highspot --company aleph --remote-only --query "developer" --limit 50
    ```
 
-9. Do not use any source's `--apply` or the Trigger.dev task's persistence path
-   until mapping and real dry-run preview are approved.
-10. Do not enable scheduled persistence yet. Next step after schedule stability
-   review is controlled scheduled persistence with explicit approval.
+9. Do not use any source's `--apply`. The only approved write boundary in this
+   phase is the dedicated, gated, one-time DEVELOPMENT validation task.
+10. Do not enable recurring scheduled or production persistence.
 11. Historical verification run `run_06fqigvi9p0np4a1o5csdrov01` exposed a
     Lever isolation defect: Spotify timed out and the old adapter did not
     attempt Highspot or Aleph. The adapter now isolates each configured company,
@@ -135,8 +178,10 @@
   evidence, dates, sections, stable posting ID, and canonical hosted URL.
   Salary, skills, experience, closing date, and country eligibility remain
   unknown.
-- Discovery is still dry-run-only. Scheduled persistence, unattended apply
-  behavior, and any application automation remain deferred.
+- Recurring discovery remains dry-run-only. Phase 7.1B.4A adds only one
+  unscheduled, manually triggered DEVELOPMENT persistence task with a
+  maximum-five cap; production persistence, recurring persistence, unattended
+  apply behavior, and application automation remain disabled.
 
 ---
 

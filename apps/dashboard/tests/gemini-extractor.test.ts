@@ -7,6 +7,10 @@ import {
   type GeminiJobExtraction,
 } from '@job-app/ingestion/gemini-contracts';
 import {
+  preprocessJobDescription,
+  verifyGeminiJobRequirements,
+} from '@job-app/ingestion';
+import {
   DEFAULT_GEMINI_FALLBACK_MODEL,
   DEFAULT_GEMINI_PRIMARY_MODEL,
   GEMINI_MAX_BACKOFF_MS,
@@ -20,6 +24,32 @@ const MODELS = {
   primary: DEFAULT_GEMINI_PRIMARY_MODEL,
   fallback: DEFAULT_GEMINI_FALLBACK_MODEL,
 };
+
+const EMPTY_VERIFIED_REQUIREMENTS = verifyGeminiJobRequirements(
+  {
+    experienceRequirements: [],
+    qualifications: [],
+    degreeRequirements: [],
+    certifications: [],
+    languages: [],
+    salary: null,
+    workArrangement: {
+      setup: null,
+      geographicRestrictions: [],
+      collaborationTimezone: null,
+      scheduleRequirements: [],
+      evidence: [],
+    },
+    employmentType: null,
+    missingOrAmbiguousCriticalInformation: [],
+  },
+  preprocessJobDescription('No contextual requirements were provided.'),
+  {
+    contentHash: 'a'.repeat(64),
+    modelIdentifier: 'test-model',
+    extractedAt: '2026-07-29T00:00:00.000Z',
+  },
+);
 
 const BASE_EXTRACTION: EnrichedGeminiJobExtraction = {
   title: 'Backend Engineer, Auth',
@@ -133,6 +163,7 @@ describe('Gemini hybrid job extraction', () => {
         confidence: BASE_EXTRACTION.confidence,
         inputKind: 'text',
         warnings: [],
+        verifiedRequirements: EMPTY_VERIFIED_REQUIREMENTS,
       }).success,
     ).toBe(true);
   });

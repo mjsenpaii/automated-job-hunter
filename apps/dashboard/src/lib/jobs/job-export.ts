@@ -52,6 +52,7 @@ export interface JobDetailData {
   rejectionReasons: string[];
   rejectionReasonRecorded: boolean;
   rawSource: string;
+  verifiedRequirements?: import('@job-app/ingestion/job-requirements-contracts').VerifiedJobRequirementsExtraction | null;
   score: {
     value: number;
     recommendation: string;

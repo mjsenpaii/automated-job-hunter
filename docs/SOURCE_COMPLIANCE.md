@@ -35,7 +35,9 @@ For every job board or data source, document the following before enabling:
   authentication, CAPTCHA handling, rate-limit bypass, application creation, or
   submission.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs. Scheduled persistence remains disabled.
+  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
+  controlled-persistence validation. Recurring and production persistence
+  remain disabled.
 
 ---
 
@@ -68,7 +70,9 @@ For every job board or data source, document the following before enabling:
   job boards, employer/application-link crawling, authentication, CAPTCHA
   handling, rate-limit bypass, application creation, or submission.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs. Scheduled persistence remains disabled.
+  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
+  controlled-persistence validation. Recurring and production persistence
+  remain disabled.
 
 ---
 
@@ -115,5 +119,7 @@ For every job board or data source, document the following before enabling:
   employer-page crawling, browser automation, login, cookies, CAPTCHA handling,
   rate-limit bypass, or auto-application.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs. Trigger orchestration attempts each configured board at most once
-  per run; scheduled persistence remains disabled.
+  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
+  controlled-persistence validation. Trigger orchestration attempts each
+  configured board at most once per run; recurring and production persistence
+  remain disabled.

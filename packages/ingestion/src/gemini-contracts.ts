@@ -4,6 +4,7 @@ import {
   GovernmentSalaryReferenceSchema,
   GovernmentScopeSchema,
 } from './government-enrichment.js';
+import { VerifiedJobRequirementsExtractionSchema } from './job-requirements-contracts.js';
 
 export const MAX_JOB_INPUT_CHARS = 100_000;
 
@@ -134,6 +135,7 @@ export const AnalyzeJobSuccessSchema = z.object({
   confidence: z.number().min(0).max(1),
   inputKind: z.enum(['url', 'html', 'text']),
   warnings: z.array(z.string()),
+  verifiedRequirements: VerifiedJobRequirementsExtractionSchema,
 }).superRefine((data, ctx) => {
   if (data.fallbackUsed && data.fallbackReason === null) {
     ctx.addIssue({

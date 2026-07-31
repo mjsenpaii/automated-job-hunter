@@ -15,6 +15,7 @@ import {
   GeminiExtractionMetadataSchema,
 } from './gemini-contracts.js';
 import { GovernmentScopeSchema } from './government-enrichment.js';
+import { VerifiedJobRequirementsExtractionSchema } from './job-requirements-contracts.js';
 
 export type { ExtractedJobData, ExtractionResult } from './types.js';
 
@@ -82,6 +83,8 @@ export const ConfirmScoreRequestSchema = z
     application_url: z.string().trim().url().max(2000).optional().nullable(),
     evidence: z.array(GeminiEvidenceSchema).max(40).default([]),
     extraction_metadata: GeminiExtractionMetadataSchema.optional(),
+    verified_requirements:
+      VerifiedJobRequirementsExtractionSchema.optional(),
   })
   .superRefine((data, ctx) => {
     const country = (data.country ?? '').trim();

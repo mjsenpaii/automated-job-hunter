@@ -9,6 +9,7 @@ import {
   type JobSearchProfileMatch,
   type JobSearchProfileId,
 } from './job-search-profiles.v1.js';
+import type { VerifiedJobRequirementsExtraction } from '../job-requirements-contracts.js';
 
 export const DiscoveryOptionsSchema = z.object({
   limit: z.number().int().min(1).max(100),
@@ -98,11 +99,35 @@ export interface DiscoveryPersistenceRecord {
   persistedStatus: 'DISCOVERED' | 'HARD_REJECTED';
   matchedProfileIds: JobSearchProfileId[];
   matchedProfileEvidence: JobSearchProfileMatch[];
+  verifiedExtraction?: VerifiedJobRequirementsExtraction;
 }
 
 export interface DiscoveryRepository {
   loadExistingJobs(): Promise<NormalizedJob[]>;
   persistBatch(records: DiscoveryPersistenceRecord[]): Promise<void>;
+}
+
+export type ControlledPersistenceIdempotencyStatus =
+  | 'NEW'
+  | 'ALREADY_COMPLETED';
+
+export interface ControlledPersistenceWriteResult {
+  idempotencyStatus: ControlledPersistenceIdempotencyStatus;
+  jobsPersisted: number;
+  scoresPersisted: number;
+  finalDatabaseDuplicates: number;
+  persistedRecords: DiscoveryPersistenceRecord[];
+}
+
+export interface ControlledDiscoveryRepository
+  extends DiscoveryRepository {
+  persistControlledBatch(
+    records: DiscoveryPersistenceRecord[],
+    controls: {
+      idempotencyKey: string;
+      maxJobsToPersist: number;
+    },
+  ): Promise<ControlledPersistenceWriteResult>;
 }
 
 export interface DiscoveryPreview {

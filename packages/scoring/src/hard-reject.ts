@@ -63,6 +63,7 @@ export function checkHardReject(
     isCountryIneligible?: boolean;
     isRelocationRequired?: boolean;
     blacklistedCompanies?: string[];
+    verifiedRequirementsOnly?: boolean;
   } = {},
 ): HardRejectResult {
   const reasons: HardRejectReason[] = [];
@@ -121,17 +122,22 @@ export function checkHardReject(
   }
 
   // 8. Required license/clearance
-  for (const req of IMPOSSIBLE_REQUIREMENTS) {
-    if (text.includes(req)) {
-      reasons.push('REQUIRED_LICENSE_MISSING');
-      evidence.push(`Requires: "${req}" — candidate does not have this`);
-      break;
+  if (!options.verifiedRequirementsOnly) {
+    for (const req of IMPOSSIBLE_REQUIREMENTS) {
+      if (text.includes(req)) {
+        reasons.push('REQUIRED_LICENSE_MISSING');
+        evidence.push(`Requires: "${req}" — candidate does not have this`);
+        break;
+      }
     }
   }
 
   // 9. Senior-level mismatch (fresh graduate with <1 year experience)
+  const seniorityText = options.verifiedRequirementsOnly
+    ? job.title.toLowerCase()
+    : text;
   for (const marker of SENIOR_MARKERS) {
-    if (text.includes(marker)) {
+    if (seniorityText.includes(marker)) {
       reasons.push('SENIORITY_MISMATCH');
       evidence.push(`Senior-level requirement: "${marker}" — candidate is a fresh graduate`);
       break;

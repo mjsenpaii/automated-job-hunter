@@ -8,7 +8,6 @@
     "start": "next start"
   },
   "dependencies": {
-    "@google/genai": "^2.13.0",
     "@job-app/classification": "workspace:*",
     "@job-app/core": "workspace:*",
     "@job-app/db": "workspace:*",

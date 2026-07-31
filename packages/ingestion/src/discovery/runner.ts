@@ -69,6 +69,7 @@ interface DiscoveryIdentityEntry {
   matchedProfileEvidence: DiscoveryPreview['matchedProfileEvidence'];
   vibeCoding: boolean;
   variants: DiscoveryIdentityVariant[];
+  persistenceRecord?: DiscoveryPersistenceRecord;
 }
 
 interface DiscoveryIdentityState {
@@ -314,6 +315,7 @@ export interface DiscoveryIdentityFinalization {
   vibeCodingRolesFound: number;
   preview: DiscoveryPreview[];
   profileStats: DiscoveryProfileStats[];
+  persistenceCandidates: DiscoveryPersistenceRecord[];
 }
 
 export function finalizeDiscoveryDeduplicationContext(
@@ -346,6 +348,7 @@ export function finalizeDiscoveryDeduplicationContext(
   let eligibleScoredJobs = 0;
   let jobsThatWouldBePersisted = 0;
   let vibeCodingRolesFound = 0;
+  const persistenceCandidates: DiscoveryPersistenceRecord[] = [];
 
   for (const entry of entries) {
     if (entry.state === 'UNTARGETED') untargeted += 1;
@@ -356,6 +359,23 @@ export function finalizeDiscoveryDeduplicationContext(
     if (entry.state === 'SCORED') {
       eligibleScoredJobs += 1;
       jobsThatWouldBePersisted += 1;
+    }
+    if (
+      entry.persistenceRecord &&
+      (entry.state === 'HARD_REJECTED' || entry.state === 'SCORED')
+    ) {
+      persistenceCandidates.push({
+        ...entry.persistenceRecord,
+        additionalSourceNames: entry.sourceNames.filter(
+          (name) => name !== entry.primarySourceName,
+        ),
+        matchedProfileIds: [...entry.persistenceRecord.matchedProfileIds],
+        matchedProfileEvidence:
+          entry.persistenceRecord.matchedProfileEvidence.map((match) => ({
+            profileId: match.profileId,
+            evidence: match.evidence.map((item) => ({ ...item })),
+          })),
+      });
     }
     if (
       entry.vibeCoding &&
@@ -399,6 +419,7 @@ export function finalizeDiscoveryDeduplicationContext(
     profileStats: activeProfileIds
       .map((profileId) => profileStats.get(profileId))
       .filter((value): value is DiscoveryProfileStats => value !== undefined),
+    persistenceCandidates,
   };
 }
 
@@ -714,6 +735,7 @@ export async function runDiscovery(
         duplicateEntry.vibeCoding = hasVibeCodingMatchEvidence(
           matchedProfileEvidence,
         );
+        duplicateEntry.persistenceRecord = persistenceRecord;
         identityState.entriesByNormalizedId.set(
           result.normalized_job.id,
           duplicateEntry,
@@ -738,6 +760,7 @@ export async function runDiscovery(
             matchedProfileEvidence,
           ),
           variants: [variant],
+          persistenceRecord,
         };
         identityState.entriesByNormalizedId.set(
           result.normalized_job.id,

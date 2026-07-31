@@ -4,6 +4,7 @@ import type {
   GeminiJobExtraction,
 } from '@job-app/ingestion/gemini-contracts';
 import { enrichGovernmentSalary } from '@job-app/ingestion/government-enrichment';
+import type { VerifiedJobRequirementsExtraction } from '@job-app/ingestion/job-requirements-contracts';
 
 export function linesToList(value: string): string[] {
   return value
@@ -27,6 +28,7 @@ export function updateExtractionField<K extends keyof GeminiJobExtraction>(
 export function extractionToConfirmPayload(
   extraction: EnrichedGeminiJobExtraction,
   metadata?: GeminiExtractionMetadata,
+  verifiedRequirements?: VerifiedJobRequirementsExtraction,
 ) {
   return {
     title: extraction.title ?? '',
@@ -67,5 +69,6 @@ export function extractionToConfirmPayload(
     application_url: extraction.applicationUrl,
     evidence: extraction.evidence,
     extraction_metadata: metadata,
+    verified_requirements: verifiedRequirements,
   };
 }

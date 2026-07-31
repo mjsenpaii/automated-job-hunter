@@ -127,6 +127,22 @@ export function ensureSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS job_scores_job_id_idx ON job_scores (job_id);
 
+    CREATE TABLE IF NOT EXISTS job_extractions (
+      job_id TEXT PRIMARY KEY REFERENCES jobs(id),
+      schema_version INTEGER NOT NULL,
+      content_hash TEXT NOT NULL,
+      model_identifier TEXT NOT NULL,
+      verification_status TEXT NOT NULL,
+      structured_json TEXT NOT NULL,
+      extracted_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS job_extractions_content_hash_idx
+      ON job_extractions (content_hash);
+    CREATE INDEX IF NOT EXISTS job_extractions_status_idx
+      ON job_extractions (verification_status);
+
     CREATE TABLE IF NOT EXISTS applications (
       id TEXT PRIMARY KEY,
       job_id TEXT NOT NULL REFERENCES jobs(id),
