@@ -1,9 +1,62 @@
 # Project Status
 
 **Last updated:** 2026-08-01 PHT
-**Current phase:** Phase 7.1B.4A-B — Controlled persistence and verified requirements extraction complete
-**Overall health:** Green — the one-time DEVELOPMENT persistence validation and atomic 14-job requirements reprocessing completed successfully; recurring and production persistence remain disabled
-**Active branch:** `master` at pushed baseline `c668314` (Phase 7.1B.4A-B changes ready for commit)
+**Current phase:** Phase 7.1B.5A — DEVELOPMENT morning scheduled persistence implemented and live-validated
+**Overall health:** Green — morning persistence is protected by an independent switch, a persistent shared five-job PHT-day budget, fixed profiles, verified extraction, and atomic writes; evening and production persistence remain disabled
+**Active branch:** `master` at pushed baseline `ab919d0` with reviewed Phase 7.1B.5A changes ready to commit
+
+---
+
+## Session — Phase 7.1B.5A Development Morning Scheduled Persistence
+
+- The existing `public-job-discovery-morning-dry-run` schedule keeps its
+  `0 8 * * *` Asia/Manila cron, DEVELOPMENT-only registration, shared
+  concurrency-one queue, 30-minute TTL, and 600-second duration. Its task-level
+  retry limit is now one.
+- Morning remains dry-run by default. It enters the controlled write path only
+  when the Trigger.dev environment is `DEVELOPMENT` and the independent process
+  switch `JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED` is exactly lowercase
+  `true`. This does not reuse or weaken the manual
+  `JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED` gate.
+- The evening `public-job-discovery-evening-dry-run` task is unchanged in
+  behavior: DEVELOPMENT-only, DRY_RUN-only, and unable to reserve budget or
+  call the persistence repository.
+- Added the additive `job_discovery_persistence_runs` SQLite ledger keyed by
+  idempotency key. It records Philippine date, task ID, run kind, persisted job
+  count, and timestamps. A database trigger rejects any reservation that would
+  raise the PHT-date total above five.
+- Manual controlled and scheduled morning persistence share this same ledger.
+  Remaining capacity is rechecked inside the same SQLite transaction that
+  writes the selected jobs, scores, verified extractions, and completion
+  activity. Duplicate final-database candidates do not consume capacity.
+- The scheduled idempotency key is deterministically derived from the fixed
+  task ID, `MORNING`, and the Asia/Manila calendar date. A completed same-day
+  invocation returns `ALREADY_COMPLETED`; an exhausted date returns
+  `DAILY_CAP_REACHED`. Both return before provider or Gemini calls.
+- Morning continues to use only the fixed `software_development` and
+  `ai_automation` profiles. Selection is stable and bounded by the remaining
+  daily capacity. Any source or extraction failure preserves the all-or-nothing
+  write boundary and consumes no daily budget.
+- No applications, submissions, resumes, cover letters, email, messages, or
+  browser automation were added. Production persistence and evening
+  persistence remain disabled.
+- Registered DEVELOPMENT run `run_06frj6g5id1v7jt47pv73m7e01` completed on
+  Philippine date `2026-08-01`. Arbeitnow, Remotive, and Lever fetched 134
+  records; no job matched the fixed morning profiles, so selection,
+  requirements Gemini calls, and persistence were all zero. Zero persistence
+  is a valid safe outcome and left jobs 14, scores 6, applications 0, and
+  extractions 14. Exactly one scheduled completion activity and its zero-count
+  ledger row were written, changing activity 2→3 while daily persisted budget
+  remained 0 with capacity 5.
+- The completed ledger key
+  `public-job-discovery-morning-dry-run:MORNING:2026-08-01` blocks the normal
+  later 8:00 AM invocation for that same PHT date before provider or Gemini
+  calls. No duplicate identities, partial writes, applications, submissions,
+  or second Trigger.dev run occurred.
+- Automated verification also passed: focused persistence/schedule coverage
+  46/46, full suite 489/489 across 41 files, workspace build 6/6, standalone
+  dashboard build, dashboard/ingestion strict TypeScript, and
+  `git diff --check`.
 
 ---
 
@@ -81,8 +134,9 @@ discarding the uncommitted Phase 7.1B.4A/7.1B.4B work.
   passed.
 - The post-apply idempotency dry-run made 0 Gemini calls, skipped all 14 rows by
   content hash, and wrote 0 records/scores/activity entries.
-- Recurring schedules remain DEVELOPMENT-only/DRY_RUN-only; production
-  persistence remains disabled.
+- At Phase 7.1B.4B completion both recurring schedules were dry-run-only.
+  Phase 7.1B.5A later adds independently gated DEVELOPMENT morning
+  persistence; evening and production persistence remain disabled.
 
 See `docs/JOB_REQUIREMENTS_EXTRACTION.md` for the trust boundary, storage model,
 shadow results, and current limitations.
@@ -142,8 +196,9 @@ leaving the morning and evening cron tasks dry-run-only.
   both `phase-7-1b4a-20260729-023908107`; the persisted completion ledger
   recorded the same five jobs, one score, and zero final duplicates. The task
   was triggered exactly once and was not rerun.
-- Morning and evening recurring tasks remain `DEVELOPMENT`-only and
-  `DRY_RUN`-only. Production persistence remains disabled.
+- At the time of the Phase 7.1B.4A run, morning and evening recurring tasks were
+  `DRY_RUN`-only. Phase 7.1B.5A later adds independently gated DEVELOPMENT
+  morning persistence; evening and production persistence remain disabled.
 
 ---
 
@@ -588,7 +643,7 @@ Implemented on top of baseline commit `2602113`; no commit or push was made.
 | Phase 4 — Resume Engine | ✅ DONE | DOCX generation, cover letters, CLI, quality gates |
 | Phase 5 — Application Package | ✅ DONE | Package builder, state machine, daily limits, kill switch |
 | Phase 6 — Browser Assistance | ⬜ NOT STARTED | Playwright (deferred) |
-| Phase 7 — Limited Automation | 🟨 IN PROGRESS | 7.1A Arbeitnow + 7.1A.2 Remotive + 7.1A.3 Lever committed; 7.1B.1 manual Trigger.dev orchestration committed; 7.1B.2 development-only schedules and 7.1B.3 category-aware profiles implemented locally |
+| Phase 7 — Limited Automation | 🟨 IN PROGRESS | Public adapters, profile-aware discovery, manual controlled persistence, verified extraction, and the gated DEVELOPMENT morning persistence path are implemented and live-validated; monitor additional daily morning runs before considering evening persistence, which remains disabled with production persistence |
 
 ---
 

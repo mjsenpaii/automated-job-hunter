@@ -88,6 +88,12 @@ export const CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID =
   'public-job-discovery-controlled-persistence';
 export const CONTROLLED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH =
   'JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED';
+export const SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID =
+  'public-job-discovery-morning-dry-run';
+export const SCHEDULED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH =
+  'JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED';
+export const PUBLIC_JOB_DISCOVERY_DAILY_LIMIT = 5 as const;
+export const PUBLIC_JOB_DISCOVERY_TIMEZONE = 'Asia/Manila' as const;
 
 export const ControlledPublicJobDiscoveryPayloadSchema = z
   .object({
@@ -162,6 +168,21 @@ export interface ControlledPublicJobDiscoveryResult {
   mode: 'CONTROLLED';
   environment: 'DEVELOPMENT';
   scheduleGroup: 'MORNING' | 'EVENING';
+  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING';
+  philippineDate: string;
+  dailyLimit: 5;
+  persistedBeforeRun: number;
+  remainingBeforeRun: number;
+  selected: number;
+  persistedThisRun: number;
+  persistedAfterRun: number;
+  dailyRemaining: number;
+  finalStatus:
+    | 'COMPLETED'
+    | 'ALREADY_COMPLETED'
+    | 'DAILY_CAP_REACHED'
+    | 'SOURCE_FAILED'
+    | 'EXTRACTION_FAILED';
   activeProfileIds: JobSearchProfileId[];
   persistenceGates: {
     developmentEnvironment: true;
@@ -179,6 +200,7 @@ export interface ControlledPublicJobDiscoveryResult {
   skippedBecauseOfCap: number;
   selectedForPersistence: number;
   selectedAfterExtraction: number;
+  extractionSucceeded: number;
   extractionFailed: number;
   jobsPersisted: number;
   scoresPersisted: number;
@@ -301,6 +323,11 @@ export interface ControlledPublicJobDiscoveryDependencies
   requirementsExtractor?: DiscoveryRequirementsExtractor;
 }
 
+export interface ScheduledMorningPublicJobDiscoveryDependencies
+  extends Omit<ControlledPublicJobDiscoveryDependencies, 'taskId'> {
+  taskId?: string;
+}
+
 interface PublicJobDiscoveryEvaluation {
   result: PublicJobDiscoveryDryRunResult;
   finalization: DiscoveryIdentityFinalization;
@@ -343,6 +370,45 @@ export function isControlledPersistenceKillSwitchEnabled(
   value: string | undefined,
 ): boolean {
   return value === 'true';
+}
+
+export function isScheduledPersistenceKillSwitchEnabled(
+  value: string | undefined,
+): boolean {
+  return value === 'true';
+}
+
+export function philippineCalendarDate(instant: Date): string {
+  if (Number.isNaN(instant.getTime())) {
+    throw new ControlledPersistenceGateError(
+      'INVALID_PAYLOAD',
+      'Scheduled timestamp is invalid.',
+    );
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: PUBLIC_JOB_DISCOVERY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant);
+  const value = (type: 'year' | 'month' | 'day') =>
+    parts.find((part) => part.type === type)?.value;
+  const year = value('year');
+  const month = value('month');
+  const day = value('day');
+  if (!year || !month || !day) {
+    throw new ControlledPersistenceGateError(
+      'INVALID_PAYLOAD',
+      'Unable to resolve the Philippine calendar date.',
+    );
+  }
+  return `${year}-${month}-${day}`;
+}
+
+export function scheduledMorningPersistenceIdempotencyKey(
+  philippineDate: string,
+): string {
+  return `${SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID}:MORNING:${philippineDate}`;
 }
 
 function parsePayload(
@@ -994,6 +1060,283 @@ function controlledPersistedPreview(
   };
 }
 
+function emptyControlledCombinedTotals(): PublicJobDiscoveryCombinedTotals {
+  return {
+    sourceRecordsFetched: 0,
+    acceptedRecords: 0,
+    invalidRecords: 0,
+    excludedByFilters: 0,
+    duplicates: 0,
+    hardRejectedJobs: 0,
+    eligibleScoredJobs: 0,
+    pipelineErrors: 0,
+    jobsThatWouldBePersisted: 0,
+    jobsPersisted: 0,
+    untargeted: 0,
+    vibeCodingRolesFound: 0,
+  };
+}
+
+function emptyControlledProfileSummaries(
+  profileIds: readonly JobSearchProfileId[],
+): PublicJobDiscoveryProfileSummary[] {
+  return profileIds.map((profileId) => ({
+    profileId,
+    profileLabel: getJobSearchProfileDisplayName(profileId),
+    recordsMatched: 0,
+    hardRejectedJobs: 0,
+    eligibleScoredJobs: 0,
+    jobsThatWouldBePersisted: 0,
+    duplicates: 0,
+    preview: [],
+  }));
+}
+
+interface AuthorizedPersistenceRun {
+  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING';
+  taskId: string;
+  philippineDate: string;
+}
+
+async function runAuthorizedPublicJobDiscoveryPersistence(
+  payload: ControlledPublicJobDiscoveryPayload,
+  dependencies: ControlledPublicJobDiscoveryDependencies,
+  run: AuthorizedPersistenceRun,
+): Promise<ControlledPublicJobDiscoveryResult> {
+  const discoveryPayload = fixedPublicJobDiscoveryPayloadForSchedule(
+    payload.scheduleGroup,
+  );
+  const databasePath =
+    dependencies.databasePath ?? defaultDatabasePath();
+  const repository =
+    dependencies.repository ??
+    createControlledDiscoveryRepositoryForRun(databasePath);
+  const dailyState = await repository.getDailyPersistenceState({
+    philippineDate: run.philippineDate,
+    idempotencyKey: payload.idempotencyKey,
+  });
+  const activeProfileIds = [...(discoveryPayload.profileIds ?? [])];
+  const earlyResult = (
+    finalStatus: 'ALREADY_COMPLETED' | 'DAILY_CAP_REACHED',
+  ): ControlledPublicJobDiscoveryResult => ({
+    mode: 'CONTROLLED',
+    environment: 'DEVELOPMENT',
+    scheduleGroup: payload.scheduleGroup,
+    runKind: run.runKind,
+    philippineDate: run.philippineDate,
+    dailyLimit: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+    persistedBeforeRun: dailyState.persistedCount,
+    remainingBeforeRun: dailyState.remaining,
+    selected: 0,
+    persistedThisRun: 0,
+    persistedAfterRun: dailyState.persistedCount,
+    dailyRemaining: dailyState.remaining,
+    finalStatus,
+    activeProfileIds,
+    persistenceGates: {
+      developmentEnvironment: true,
+      killSwitchEnabled: true,
+      controlledPayloadApproved: true,
+    },
+    persistenceLimit: payload.maxJobsToPersist,
+    idempotencyStatus: dailyState.idempotencyStatus,
+    sources: {},
+    profileSummaries: emptyControlledProfileSummaries(activeProfileIds),
+    combinedTotals: emptyControlledCombinedTotals(),
+    qualifiedBeforeCap: 0,
+    skippedBecauseOfCap: 0,
+    selectedForPersistence: 0,
+    selectedAfterExtraction: 0,
+    extractionSucceeded: 0,
+    extractionFailed: 0,
+    jobsPersisted: 0,
+    scoresPersisted: 0,
+    finalDatabaseDuplicates: 0,
+    applicationsCreated: 0,
+    submissionsCreated: 0,
+    sourceFailures: [],
+    persistedJobs: [],
+    persistenceEnabled: true,
+  });
+  if (dailyState.idempotencyStatus === 'ALREADY_COMPLETED') {
+    return earlyResult('ALREADY_COMPLETED');
+  }
+  if (dailyState.remaining === 0) {
+    return earlyResult('DAILY_CAP_REACHED');
+  }
+
+  const evaluation = await evaluatePublicJobDiscovery(
+    discoveryPayload,
+    dependencies,
+    repository,
+  );
+  const qualifiedBeforeCap =
+    evaluation.finalization.persistenceCandidates.length;
+  const persistenceLimit = Math.min(
+    payload.maxJobsToPersist,
+    dailyState.remaining,
+  );
+  const selected = evaluation.finalization.persistenceCandidates.slice(
+    0,
+    persistenceLimit,
+  );
+  const sourceFailures = collectControlledSourceFailures(
+    evaluation.result.sources,
+  );
+  const sources = sanitizeControlledSources(evaluation.result.sources);
+  for (const source of Object.values(sources)) {
+    if (source) source.jobsPersisted = 0;
+  }
+
+  const stoppedResult = (
+    finalStatus: 'SOURCE_FAILED' | 'EXTRACTION_FAILED',
+    extractionSucceeded: number,
+    extractionFailed: number,
+  ): ControlledPublicJobDiscoveryResult => ({
+    mode: 'CONTROLLED',
+    environment: 'DEVELOPMENT',
+    scheduleGroup: payload.scheduleGroup,
+    runKind: run.runKind,
+    philippineDate: run.philippineDate,
+    dailyLimit: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+    persistedBeforeRun: dailyState.persistedCount,
+    remainingBeforeRun: dailyState.remaining,
+    selected: selected.length,
+    persistedThisRun: 0,
+    persistedAfterRun: dailyState.persistedCount,
+    dailyRemaining: dailyState.remaining,
+    finalStatus,
+    activeProfileIds: [...evaluation.result.activeProfileIds],
+    persistenceGates: {
+      developmentEnvironment: true,
+      killSwitchEnabled: true,
+      controlledPayloadApproved: true,
+    },
+    persistenceLimit: payload.maxJobsToPersist,
+    idempotencyStatus: 'NOT_STARTED',
+    sources,
+    profileSummaries: evaluation.result.profileSummaries,
+    combinedTotals: {
+      ...evaluation.result.combinedTotals,
+      jobsPersisted: 0,
+    },
+    qualifiedBeforeCap,
+    skippedBecauseOfCap: Math.max(
+      0,
+      qualifiedBeforeCap - selected.length,
+    ),
+    selectedForPersistence: selected.length,
+    selectedAfterExtraction: extractionSucceeded,
+    extractionSucceeded,
+    extractionFailed,
+    jobsPersisted: 0,
+    scoresPersisted: 0,
+    finalDatabaseDuplicates: 0,
+    applicationsCreated: 0,
+    submissionsCreated: 0,
+    sourceFailures,
+    persistedJobs: [],
+    persistenceEnabled: true,
+  });
+  if (sourceFailures.length > 0) {
+    return stoppedResult('SOURCE_FAILED', 0, 0);
+  }
+
+  const verifiedSkills =
+    dependencies.verifiedSkills ??
+    loadVerifiedSkills(dependencies.skillsPath ?? defaultSkillsPath());
+  const enrichedSelected: DiscoveryPersistenceRecord[] = [];
+  let extractionFailed = 0;
+  for (const record of selected) {
+    try {
+      enrichedSelected.push(
+        await enrichControlledPersistenceCandidate(
+          record,
+          verifiedSkills,
+          dependencies.requirementsExtractor,
+        ),
+      );
+    } catch {
+      extractionFailed += 1;
+    }
+  }
+  if (extractionFailed > 0) {
+    return stoppedResult(
+      'EXTRACTION_FAILED',
+      enrichedSelected.length,
+      extractionFailed,
+    );
+  }
+
+  const writeResult = await repository.persistControlledBatch(enrichedSelected, {
+    idempotencyKey: payload.idempotencyKey,
+    maxJobsToPersist: persistenceLimit,
+    philippineDate: run.philippineDate,
+    taskId: run.taskId,
+    runKind: run.runKind,
+  });
+  for (const record of writeResult.persistedRecords) {
+    const sourceKey = sourceNameKey(record.discovered.sourceName);
+    const source = sourceKey ? sources[sourceKey] : undefined;
+    if (source) source.jobsPersisted += 1;
+  }
+  const combinedTotals = {
+    ...evaluation.result.combinedTotals,
+    jobsPersisted: writeResult.jobsPersisted,
+  };
+
+  return {
+    mode: 'CONTROLLED',
+    environment: 'DEVELOPMENT',
+    scheduleGroup: payload.scheduleGroup,
+    runKind: run.runKind,
+    philippineDate: run.philippineDate,
+    dailyLimit: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+    persistedBeforeRun: writeResult.persistedBeforeRun,
+    remainingBeforeRun: writeResult.remainingBeforeRun,
+    selected: selected.length,
+    persistedThisRun: writeResult.jobsPersisted,
+    persistedAfterRun: writeResult.persistedAfterRun,
+    dailyRemaining: writeResult.dailyRemaining,
+    finalStatus:
+      writeResult.idempotencyStatus === 'ALREADY_COMPLETED'
+        ? 'ALREADY_COMPLETED'
+        : writeResult.idempotencyStatus === 'NOT_STARTED'
+          ? 'DAILY_CAP_REACHED'
+          : 'COMPLETED',
+    activeProfileIds: [...evaluation.result.activeProfileIds],
+    persistenceGates: {
+      developmentEnvironment: true,
+      killSwitchEnabled: true,
+      controlledPayloadApproved: true,
+    },
+    persistenceLimit: payload.maxJobsToPersist,
+    idempotencyStatus: writeResult.idempotencyStatus,
+    sources,
+    profileSummaries: evaluation.result.profileSummaries,
+    combinedTotals,
+    qualifiedBeforeCap,
+    skippedBecauseOfCap:
+      Math.max(0, qualifiedBeforeCap - selected.length) +
+      writeResult.skippedBecauseOfDailyCap,
+    selectedForPersistence: selected.length,
+    selectedAfterExtraction: enrichedSelected.length,
+    extractionSucceeded: enrichedSelected.length,
+    extractionFailed,
+    jobsPersisted: writeResult.jobsPersisted,
+    scoresPersisted: writeResult.scoresPersisted,
+    finalDatabaseDuplicates:
+      writeResult.finalDatabaseDuplicates,
+    applicationsCreated: 0,
+    submissionsCreated: 0,
+    sourceFailures,
+    persistedJobs: writeResult.persistedRecords
+      .slice(0, 5)
+      .map(controlledPersistedPreview),
+    persistenceEnabled: true,
+  };
+}
+
 export async function runControlledPublicJobDiscovery(
   unvalidatedPayload: unknown,
   dependencies: ControlledPublicJobDiscoveryDependencies,
@@ -1028,100 +1371,62 @@ export async function runControlledPublicJobDiscovery(
   }
 
   const payload = parsed.data;
-  const discoveryPayload = fixedPublicJobDiscoveryPayloadForSchedule(
-    payload.scheduleGroup,
+  const philippineDate = philippineCalendarDate(
+    (dependencies.now ?? (() => new Date()))(),
   );
-  const databasePath =
-    dependencies.databasePath ?? defaultDatabasePath();
-  const repository =
-    dependencies.repository ??
-    createControlledDiscoveryRepositoryForRun(databasePath);
-  const evaluation = await evaluatePublicJobDiscovery(
-    discoveryPayload,
+  return runAuthorizedPublicJobDiscoveryPersistence(
+    payload,
     dependencies,
-    repository,
-  );
-  const qualifiedBeforeCap =
-    evaluation.finalization.persistenceCandidates.length;
-  const selected = evaluation.finalization.persistenceCandidates.slice(
-    0,
-    payload.maxJobsToPersist,
-  );
-  const verifiedSkills =
-    dependencies.verifiedSkills ??
-    loadVerifiedSkills(dependencies.skillsPath ?? defaultSkillsPath());
-  const enrichedSelected: DiscoveryPersistenceRecord[] = [];
-  let extractionFailed = 0;
-  for (const record of selected) {
-    try {
-      enrichedSelected.push(
-        await enrichControlledPersistenceCandidate(
-          record,
-          verifiedSkills,
-          dependencies.requirementsExtractor,
-        ),
-      );
-    } catch {
-      extractionFailed += 1;
-    }
-  }
-  const writeResult = await repository.persistControlledBatch(enrichedSelected, {
-    idempotencyKey: payload.idempotencyKey,
-    maxJobsToPersist: payload.maxJobsToPersist,
-  });
-
-  const sourceFailures = collectControlledSourceFailures(
-    evaluation.result.sources,
-  );
-  const sources = sanitizeControlledSources(evaluation.result.sources);
-  for (const source of Object.values(sources)) {
-    if (source) source.jobsPersisted = 0;
-  }
-  for (const record of writeResult.persistedRecords) {
-    const sourceKey = sourceNameKey(record.discovered.sourceName);
-    const source = sourceKey ? sources[sourceKey] : undefined;
-    if (source) source.jobsPersisted += 1;
-  }
-  const combinedTotals = {
-    ...evaluation.result.combinedTotals,
-    jobsPersisted: writeResult.jobsPersisted,
-  };
-
-  return {
-    mode: 'CONTROLLED',
-    environment: 'DEVELOPMENT',
-    scheduleGroup: payload.scheduleGroup,
-    activeProfileIds: [...evaluation.result.activeProfileIds],
-    persistenceGates: {
-      developmentEnvironment: true,
-      killSwitchEnabled: true,
-      controlledPayloadApproved: true,
+    {
+      runKind: 'MANUAL_CONTROLLED',
+      taskId: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      philippineDate,
     },
-    persistenceLimit: payload.maxJobsToPersist,
-    idempotencyStatus: writeResult.idempotencyStatus,
-    sources,
-    profileSummaries: evaluation.result.profileSummaries,
-    combinedTotals,
-    qualifiedBeforeCap,
-    skippedBecauseOfCap: Math.max(
-      0,
-      qualifiedBeforeCap - selected.length,
-    ),
-    selectedForPersistence: selected.length,
-    selectedAfterExtraction: enrichedSelected.length,
-    extractionFailed,
-    jobsPersisted: writeResult.jobsPersisted,
-    scoresPersisted: writeResult.scoresPersisted,
-    finalDatabaseDuplicates:
-      writeResult.finalDatabaseDuplicates,
-    applicationsCreated: 0,
-    submissionsCreated: 0,
-    sourceFailures,
-    persistedJobs: writeResult.persistedRecords
-      .slice(0, 5)
-      .map(controlledPersistedPreview),
-    persistenceEnabled: true,
+  );
+}
+
+export async function runScheduledMorningPublicJobDiscoveryPersistence(
+  dependencies: ScheduledMorningPublicJobDiscoveryDependencies,
+): Promise<ControlledPublicJobDiscoveryResult> {
+  const taskId =
+    dependencies.taskId ?? SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID;
+  if (taskId !== SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID) {
+    throw new ControlledPersistenceGateError(
+      'WRONG_TASK',
+      'Scheduled morning persistence is available only from its fixed task.',
+    );
+  }
+  if (dependencies.environmentType !== 'DEVELOPMENT') {
+    throw new ControlledPersistenceGateError(
+      'NON_DEVELOPMENT_ENVIRONMENT',
+      'Scheduled morning persistence is restricted to DEVELOPMENT.',
+    );
+  }
+  if (!dependencies.killSwitchEnabled) {
+    throw new ControlledPersistenceGateError(
+      'KILL_SWITCH_DISABLED',
+      'Scheduled morning persistence is disabled.',
+    );
+  }
+  const philippineDate = philippineCalendarDate(
+    (dependencies.now ?? (() => new Date()))(),
+  );
+  const payload: ControlledPublicJobDiscoveryPayload = {
+    scheduleGroup: 'MORNING',
+    persistenceMode: 'CONTROLLED',
+    maxJobsToPersist: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+    idempotencyKey:
+      scheduledMorningPersistenceIdempotencyKey(philippineDate),
   };
+  return runAuthorizedPublicJobDiscoveryPersistence(
+    payload,
+    { ...dependencies, taskId },
+    {
+      runKind: 'SCHEDULED_MORNING',
+      taskId,
+      philippineDate,
+    },
+  );
 }
 
 export function formatControlledPublicJobDiscoveryForLog(
@@ -1131,15 +1436,23 @@ export function formatControlledPublicJobDiscoveryForLog(
     `Public job discovery ${result.mode}`,
     `Environment: ${result.environment}`,
     `Schedule group: ${result.scheduleGroup}`,
+    `Run kind: ${result.runKind}`,
+    `Philippine date: ${result.philippineDate}`,
     `Active profiles: ${result.activeProfileIds.join(', ')}`,
+    `Daily limit: ${result.dailyLimit}`,
+    `Persisted before run: ${result.persistedBeforeRun}`,
+    `Remaining before run: ${result.remainingBeforeRun}`,
     `Persistence limit: ${result.persistenceLimit}`,
     `Idempotency status: ${result.idempotencyStatus}`,
+    `Final status: ${result.finalStatus}`,
     `Qualified before cap: ${result.qualifiedBeforeCap}`,
     `Skipped because of cap: ${result.skippedBecauseOfCap}`,
     `Selected for persistence: ${result.selectedForPersistence}`,
     `Selected after verified extraction: ${result.selectedAfterExtraction}`,
     `Extraction failed: ${result.extractionFailed}`,
     `Jobs persisted: ${result.jobsPersisted}`,
+    `Persisted after run: ${result.persistedAfterRun}`,
+    `Daily remaining: ${result.dailyRemaining}`,
     `Scores persisted: ${result.scoresPersisted}`,
     `Final database duplicates: ${result.finalDatabaseDuplicates}`,
     `Applications created: ${result.applicationsCreated}`,

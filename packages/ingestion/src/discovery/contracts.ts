@@ -109,7 +109,20 @@ export interface DiscoveryRepository {
 
 export type ControlledPersistenceIdempotencyStatus =
   | 'NEW'
-  | 'ALREADY_COMPLETED';
+  | 'ALREADY_COMPLETED'
+  | 'NOT_STARTED';
+
+export type ControlledPersistenceRunKind =
+  | 'MANUAL_CONTROLLED'
+  | 'SCHEDULED_MORNING';
+
+export interface DailyPersistenceState {
+  philippineDate: string;
+  dailyLimit: 5;
+  persistedCount: number;
+  remaining: number;
+  idempotencyStatus: ControlledPersistenceIdempotencyStatus;
+}
 
 export interface ControlledPersistenceWriteResult {
   idempotencyStatus: ControlledPersistenceIdempotencyStatus;
@@ -117,15 +130,27 @@ export interface ControlledPersistenceWriteResult {
   scoresPersisted: number;
   finalDatabaseDuplicates: number;
   persistedRecords: DiscoveryPersistenceRecord[];
+  persistedBeforeRun: number;
+  remainingBeforeRun: number;
+  persistedAfterRun: number;
+  dailyRemaining: number;
+  skippedBecauseOfDailyCap: number;
 }
 
 export interface ControlledDiscoveryRepository
   extends DiscoveryRepository {
+  getDailyPersistenceState(controls: {
+    philippineDate: string;
+    idempotencyKey: string;
+  }): Promise<DailyPersistenceState>;
   persistControlledBatch(
     records: DiscoveryPersistenceRecord[],
     controls: {
       idempotencyKey: string;
       maxJobsToPersist: number;
+      philippineDate: string;
+      taskId: string;
+      runKind: ControlledPersistenceRunKind;
     },
   ): Promise<ControlledPersistenceWriteResult>;
 }

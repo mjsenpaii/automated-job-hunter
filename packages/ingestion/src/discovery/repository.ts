@@ -1,6 +1,10 @@
 import { checkDuplicate } from '@job-app/classification';
-import { activity_log, jobs } from '@job-app/db/schema';
-import { and, eq } from 'drizzle-orm';
+import {
+  activity_log,
+  job_discovery_persistence_runs,
+  jobs,
+} from '@job-app/db/schema';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   insertPersistableIngestionResult,
   persistIngestionResults,
@@ -15,7 +19,75 @@ import type {
 
 const CONTROLLED_DISCOVERY_ACTIVITY =
   'CONTROLLED_PUBLIC_JOB_DISCOVERY_COMPLETED';
+const SCHEDULED_MORNING_DISCOVERY_ACTIVITY =
+  'SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_COMPLETED';
 const CONTROLLED_DISCOVERY_ENTITY_TYPE = 'system';
+const PUBLIC_JOB_DISCOVERY_DAILY_LIMIT = 5 as const;
+
+function validatePhilippineDate(value: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error('Philippine persistence date must use YYYY-MM-DD.');
+  }
+}
+
+function readDailyPersistenceState(
+  database: Pick<JobDatabase, 'select'>,
+  controls: { philippineDate: string; idempotencyKey: string },
+) {
+  validatePhilippineDate(controls.philippineDate);
+  const completedRun = database
+    .select({ idempotencyKey: job_discovery_persistence_runs.idempotency_key })
+    .from(job_discovery_persistence_runs)
+    .where(
+      eq(
+        job_discovery_persistence_runs.idempotency_key,
+        controls.idempotencyKey,
+      ),
+    )
+    .get();
+  const legacyCompletion = completedRun
+    ? undefined
+    : database
+        .select({ id: activity_log.id })
+        .from(activity_log)
+        .where(
+          and(
+            eq(activity_log.action, CONTROLLED_DISCOVERY_ACTIVITY),
+            eq(
+              activity_log.entity_type,
+              CONTROLLED_DISCOVERY_ENTITY_TYPE,
+            ),
+            eq(activity_log.entity_id, controls.idempotencyKey),
+          ),
+        )
+        .get();
+  const aggregate = database
+    .select({
+      persistedCount: sql<number>`COALESCE(SUM(${job_discovery_persistence_runs.persisted_job_count}), 0)`,
+    })
+    .from(job_discovery_persistence_runs)
+    .where(
+      eq(
+        job_discovery_persistence_runs.philippine_date,
+        controls.philippineDate,
+      ),
+    )
+    .get();
+  const persistedCount = Number(aggregate?.persistedCount ?? 0);
+  return {
+    philippineDate: controls.philippineDate,
+    dailyLimit: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+    persistedCount,
+    remaining: Math.max(
+      0,
+      PUBLIC_JOB_DISCOVERY_DAILY_LIMIT - persistedCount,
+    ),
+    idempotencyStatus:
+      completedRun || legacyCompletion
+        ? ('ALREADY_COMPLETED' as const)
+        : ('NOT_STARTED' as const),
+  };
+}
 
 function snapshot(record: DiscoveryPersistenceRecord): string {
   return JSON.stringify({
@@ -76,6 +148,9 @@ export function createDiscoveryRepository(
         })),
       );
     },
+    async getDailyPersistenceState(controls) {
+      return readDailyPersistenceState(database, controls);
+    },
     async persistControlledBatch(records, controls) {
       if (
         !Number.isInteger(controls.maxJobsToPersist) ||
@@ -92,35 +167,39 @@ export function createDiscoveryRepository(
         );
       }
 
+      validatePhilippineDate(controls.philippineDate);
       return database.transaction(
         (transaction): ControlledPersistenceWriteResult => {
-          const completed = transaction
-            .select({ id: activity_log.id })
-            .from(activity_log)
-            .where(
-              and(
-                eq(
-                  activity_log.action,
-                  CONTROLLED_DISCOVERY_ACTIVITY,
-                ),
-                eq(
-                  activity_log.entity_type,
-                  CONTROLLED_DISCOVERY_ENTITY_TYPE,
-                ),
-                eq(
-                  activity_log.entity_id,
-                  controls.idempotencyKey,
-                ),
-              ),
-            )
-            .get();
-          if (completed) {
+          const dailyState = readDailyPersistenceState(
+            transaction,
+            controls,
+          );
+          if (dailyState.idempotencyStatus === 'ALREADY_COMPLETED') {
             return {
               idempotencyStatus: 'ALREADY_COMPLETED',
               jobsPersisted: 0,
               scoresPersisted: 0,
               finalDatabaseDuplicates: 0,
               persistedRecords: [],
+              persistedBeforeRun: dailyState.persistedCount,
+              remainingBeforeRun: dailyState.remaining,
+              persistedAfterRun: dailyState.persistedCount,
+              dailyRemaining: dailyState.remaining,
+              skippedBecauseOfDailyCap: 0,
+            };
+          }
+          if (dailyState.remaining === 0) {
+            return {
+              idempotencyStatus: 'NOT_STARTED',
+              jobsPersisted: 0,
+              scoresPersisted: 0,
+              finalDatabaseDuplicates: 0,
+              persistedRecords: [],
+              persistedBeforeRun: dailyState.persistedCount,
+              remainingBeforeRun: 0,
+              persistedAfterRun: dailyState.persistedCount,
+              dailyRemaining: 0,
+              skippedBecauseOfDailyCap: records.length,
             };
           }
 
@@ -129,8 +208,7 @@ export function createDiscoveryRepository(
             .from(jobs)
             .all()
             .map(persistedJobToNormalized);
-          const persistedRecords: DiscoveryPersistenceRecord[] = [];
-          let scoresPersisted = 0;
+          const uniqueRecords: DiscoveryPersistenceRecord[] = [];
           let finalDatabaseDuplicates = 0;
 
           for (const record of records) {
@@ -144,6 +222,35 @@ export function createDiscoveryRepository(
               finalDatabaseDuplicates += 1;
               continue;
             }
+            knownJobs.push(normalized);
+            uniqueRecords.push(record);
+          }
+
+          const approvedRecords = uniqueRecords.slice(
+            0,
+            Math.min(
+              controls.maxJobsToPersist,
+              dailyState.remaining,
+            ),
+          );
+          const skippedBecauseOfDailyCap = Math.max(
+            0,
+            uniqueRecords.length - approvedRecords.length,
+          );
+
+          transaction
+            .insert(job_discovery_persistence_runs)
+            .values({
+              idempotency_key: controls.idempotencyKey,
+              philippine_date: controls.philippineDate,
+              task_id: controls.taskId,
+              run_kind: controls.runKind,
+              persisted_job_count: approvedRecords.length,
+            })
+            .run();
+
+          let scoresPersisted = 0;
+          for (const record of approvedRecords) {
             insertPersistableIngestionResult(transaction, {
               result: record.result,
               metadata: {
@@ -152,23 +259,28 @@ export function createDiscoveryRepository(
                 verifiedExtraction: record.verifiedExtraction,
               },
             });
-            knownJobs.push(normalized);
-            persistedRecords.push(record);
             if (record.result.score_detail) scoresPersisted += 1;
           }
 
           transaction
             .insert(activity_log)
             .values({
-              action: CONTROLLED_DISCOVERY_ACTIVITY,
+              action:
+                controls.runKind === 'SCHEDULED_MORNING'
+                  ? SCHEDULED_MORNING_DISCOVERY_ACTIVITY
+                  : CONTROLLED_DISCOVERY_ACTIVITY,
               entity_type: CONTROLLED_DISCOVERY_ENTITY_TYPE,
               entity_id: controls.idempotencyKey,
               details: JSON.stringify({
-                version: 1,
-                jobsPersisted: persistedRecords.length,
+                version: 2,
+                runKind: controls.runKind,
+                taskId: controls.taskId,
+                philippineDate: controls.philippineDate,
+                jobsPersisted: approvedRecords.length,
                 scoresPersisted,
                 finalDatabaseDuplicates,
-                jobIds: persistedRecords.map(
+                skippedBecauseOfDailyCap,
+                jobIds: approvedRecords.map(
                   (record) => record.result.job_id,
                 ),
               }),
@@ -177,10 +289,19 @@ export function createDiscoveryRepository(
 
           return {
             idempotencyStatus: 'NEW',
-            jobsPersisted: persistedRecords.length,
+            jobsPersisted: approvedRecords.length,
             scoresPersisted,
             finalDatabaseDuplicates,
-            persistedRecords,
+            persistedRecords: approvedRecords,
+            persistedBeforeRun: dailyState.persistedCount,
+            remainingBeforeRun: dailyState.remaining,
+            persistedAfterRun:
+              dailyState.persistedCount + approvedRecords.length,
+            dailyRemaining: Math.max(
+              0,
+              dailyState.remaining - approvedRecords.length,
+            ),
+            skippedBecauseOfDailyCap,
           };
         },
       );

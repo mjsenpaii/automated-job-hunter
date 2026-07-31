@@ -167,6 +167,79 @@ export function ensureSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS activity_log_entity_idx ON activity_log (entity_type, entity_id);
 
+    CREATE TABLE IF NOT EXISTS job_discovery_persistence_runs (
+      idempotency_key TEXT PRIMARY KEY,
+      philippine_date TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      run_kind TEXT NOT NULL,
+      persisted_job_count INTEGER NOT NULL CHECK (
+        persisted_job_count >= 0 AND persisted_job_count <= 5
+      ),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS job_discovery_persistence_runs_ph_date_idx
+      ON job_discovery_persistence_runs (philippine_date);
+    CREATE TRIGGER IF NOT EXISTS job_discovery_persistence_runs_daily_limit
+      BEFORE INSERT ON job_discovery_persistence_runs
+      WHEN (
+        SELECT COALESCE(SUM(persisted_job_count), 0)
+        FROM job_discovery_persistence_runs
+        WHERE philippine_date = NEW.philippine_date
+      ) + NEW.persisted_job_count > 5
+      BEGIN
+        SELECT RAISE(ABORT, 'job discovery daily persistence limit exceeded');
+      END;
+
+    WITH legacy_controlled_runs AS (
+      SELECT
+        id,
+        entity_id AS idempotency_key,
+        date(created_at, '+8 hours') AS philippine_date,
+        CAST(json_extract(details, '$.jobsPersisted') AS INTEGER)
+          AS persisted_job_count,
+        created_at,
+        SUM(
+          CAST(json_extract(details, '$.jobsPersisted') AS INTEGER)
+        ) OVER (
+          PARTITION BY date(created_at, '+8 hours')
+          ORDER BY created_at, id
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS cumulative_persisted_count
+      FROM activity_log
+      WHERE action = 'CONTROLLED_PUBLIC_JOB_DISCOVERY_COMPLETED'
+        AND entity_type = 'system'
+        AND entity_id IS NOT NULL
+        AND details IS NOT NULL
+        AND json_valid(details)
+        AND CAST(json_extract(details, '$.jobsPersisted') AS INTEGER)
+          BETWEEN 0 AND 5
+    )
+    INSERT INTO job_discovery_persistence_runs (
+      idempotency_key,
+      philippine_date,
+      task_id,
+      run_kind,
+      persisted_job_count,
+      created_at,
+      updated_at
+    )
+    SELECT
+      idempotency_key,
+      philippine_date,
+      'public-job-discovery-controlled-persistence',
+      'MANUAL_CONTROLLED',
+      persisted_job_count,
+      created_at,
+      created_at
+    FROM legacy_controlled_runs
+    WHERE cumulative_persisted_count <= 5
+      AND NOT EXISTS (
+        SELECT 1
+        FROM job_discovery_persistence_runs existing
+        WHERE existing.idempotency_key = legacy_controlled_runs.idempotency_key
+      );
+
     CREATE TABLE IF NOT EXISTS blacklist (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_name TEXT NOT NULL,

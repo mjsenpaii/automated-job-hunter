@@ -76,10 +76,13 @@ describe("Trigger.dev discovery schedules", () => {
     });
   });
 
-  it("routes both schedules through the shared helper", () => {
+  it("routes morning through its gated persistence path and evening through the dry-run helper", () => {
     const scheduled = source(scheduledTaskFile);
     expect(scheduled).toContain(
       'runScheduledPublicJobDiscoveryDryRun("MORNING", payload)',
+    );
+    expect(scheduled).toContain(
+      "runScheduledMorningPublicJobDiscoveryPersistence({",
     );
     expect(scheduled).toContain(
       'runScheduledPublicJobDiscoveryDryRun("EVENING", payload)',
@@ -101,9 +104,10 @@ describe("Trigger.dev discovery schedules", () => {
     expect(manual).toContain("queue: publicJobDiscoveryQueue");
   });
 
-  it("uses ttl 30m and maximum 2 attempts", () => {
+  it("uses ttl 30m, one morning attempt, and bounded evening dry-run retries", () => {
     const scheduled = source(scheduledTaskFile);
     expect(scheduled).toContain('ttl: "30m"');
+    expect(scheduled).toContain("maxAttempts: 1");
     expect(scheduled).toContain("maxAttempts: 2");
   });
 
@@ -112,14 +116,14 @@ describe("Trigger.dev discovery schedules", () => {
     expect(scheduled).not.toMatch(/schedules\.create\(/);
   });
 
-  it("stays dry-run and does not create persistence or applications", () => {
+  it("keeps shared dry-run execution free of persistence and applications", () => {
     const shared = source(sharedFile);
     expect(shared).toContain("runPublicJobDiscoveryDryRun(");
     expect(shared).toContain("fixedPayloadForSchedule");
     expect(shared).not.toMatch(/--apply|apply:\s*true|persistBatch|applicationsCreated:\s*[1-9]/);
   });
 
-  it("keeps both recurring schedules dry-run-only and payload-independent", () => {
+  it("keeps evening dry-run-only while morning uses an independent exact switch", () => {
     const scheduled = source(scheduledTaskFile);
     expect(scheduled).toContain(
       'runScheduledPublicJobDiscoveryDryRun("MORNING", payload)',
@@ -127,8 +131,22 @@ describe("Trigger.dev discovery schedules", () => {
     expect(scheduled).toContain(
       'runScheduledPublicJobDiscoveryDryRun("EVENING", payload)',
     );
-    expect(scheduled).not.toMatch(
-      /CONTROLLED|runControlledPublicJobDiscovery|process\.env|persistControlledBatch/,
+    expect(scheduled).toContain(
+      "SCHEDULED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH",
+    );
+    expect(scheduled).toContain(
+      "process.env[SCHEDULED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH]",
+    );
+    const eveningDefinition = scheduled.slice(
+      scheduled.indexOf(
+        "export const publicJobDiscoveryEveningDryRunTask",
+      ),
+    );
+    expect(eveningDefinition).toContain(
+      'runScheduledPublicJobDiscoveryDryRun("EVENING", payload)',
+    );
+    expect(eveningDefinition).not.toMatch(
+      /CONTROLLED|runScheduledMorningPublicJobDiscoveryPersistence|process\.env|persistControlledBatch/,
     );
   });
 
@@ -179,7 +197,7 @@ describe("Trigger.dev discovery schedules", () => {
     expect(orchestration).toContain("finally");
   });
 
-  it("contains no Gemini or shell execution usage", () => {
+  it("contains no direct Gemini SDK or shell execution usage", () => {
     const aggregate = [
       source(sharedFile),
       source(scheduledTaskFile),

@@ -292,20 +292,19 @@ Two development-only declarative schedules are attached with `schedules.task()`:
   - timezone: `Asia/Manila`
   - environments: `["DEVELOPMENT"]`
 
-Both scheduled tasks call one shared helper, but use different fixed profile
-payloads and retrieval hints. Morning targets software development and AI
-automation, while evening targets AI-augmented development and low-code/no-code.
-Both remain remote-only with 50/50/50 source limits and configured Lever boards
+The schedules use different fixed profile payloads and retrieval hints. Morning
+targets software development and AI automation, while evening targets
+AI-augmented development and low-code/no-code. Both remain remote-only with
+50/50/50 source limits and configured Lever boards
 `spotify`/`highspot`/`aleph`. Manual Trigger.dev payload defaults and the
 source-specific manual CLIs remain separate controls.
 
-Development schedules trigger only while the Trigger.dev dev CLI is running, and
-the local PC must be running for those scheduled runs to execute. These schedules
-never enable persistence or application submission.
-
-Trigger.dev recurring scheduled persistence remains deferred. Phase 7.1B.4A
-adds a separate unscheduled controlled-persistence task; it does not change
-either cron task.
+Development schedules trigger only while the Trigger.dev dev CLI is running,
+and the local PC must be running for those scheduled runs to execute. These
+schedules never enable application submission. The evening schedule always
+calls the dry-run helper. As of Phase 7.1B.5A, morning still calls that helper
+by default but may enter controlled persistence only in `DEVELOPMENT` when
+`JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED` is exactly lowercase `true`.
 
 ## Phase 7.1B.3 Job Search Profiles / Category-Aware Discovery
 
@@ -414,9 +413,9 @@ they are not represented as a replacement live provider run.
 
 Task ID: `public-job-discovery-controlled-persistence`
 
-This manually triggered task has no cron schedule. The existing morning and
-evening tasks continue to call only `runPublicJobDiscoveryDryRun()` with fixed
-dry-run payloads.
+This manually triggered task has no cron schedule. It remains independent from
+the separately gated Phase 7.1B.5A morning schedule. Evening continues to call
+only `runPublicJobDiscoveryDryRun()` with its fixed dry-run payload.
 
 All independent persistence gates must pass before any provider fetch or
 database access:
@@ -447,14 +446,13 @@ inside the repository. Selection follows stable source/registry order. The
 repository rechecks the live database with the existing canonical/semantic
 deduplication logic immediately before each insert.
 
-Selected job/score inserts and a completion record in the existing
-`activity_log` table are one SQLite transaction. A completed idempotency key
-returns `ALREADY_COMPLETED` and writes nothing. This provides persistent
-idempotency for serialized invocations through the concurrency-one controlled
-task. There is intentionally no migration or new unique constraint; unrelated
-concurrent writers that bypass the task queue remain outside this guarantee.
-Callers should additionally pass the same payload key as Trigger.dev's
-task-level idempotency key.
+Selected job/score/extraction inserts, persistent daily-budget reservation, and
+a completion record are one SQLite transaction. A completed idempotency key
+returns `ALREADY_COMPLETED` and writes nothing. Phase 7.1B.5A adds the unique
+`job_discovery_persistence_runs` ledger and database-level daily-limit trigger,
+so manual and morning scheduled persistence share one durable PHT-day budget
+across worker restarts. Callers should still pass the same payload key as
+Trigger.dev's task-level idempotency key.
 
 The task has queue concurrency one, `maxAttempts: 1`, a 30-minute TTL, and a
 600-second maximum duration. A task failure is never automatically retried
@@ -468,7 +466,7 @@ requirements-extraction call after final unique candidate selection and before
 future controlled writes. It remains bounded to at most five selected jobs,
 fails closed on extraction error, and still has no application, email, browser,
 resume, cover-letter, login, CAPTCHA, or form-submission dependency. Production
-and recurring scheduled persistence remain disabled.
+and evening scheduled persistence remain disabled.
 
 The required one-time DEVELOPMENT validation completed through the registered
 task as run `run_06fqk1omnhaft7a9ipea2iqc01` with status `COMPLETED`. The
@@ -486,9 +484,9 @@ applications and zero submissions. The same bounded idempotency key,
 `phase-7-1b4a-20260729-023908107`, was used at both payload and Trigger.dev
 task level, and the task was triggered exactly once.
 
-This validation does not enable recurring writes. The morning and evening
-scheduled tasks remain `DEVELOPMENT`-only and `DRY_RUN`-only, and production
-persistence remains disabled.
+This historical validation did not itself enable recurring writes. Phase
+7.1B.5A later adds independently gated DEVELOPMENT morning persistence;
+evening and production persistence remain disabled.
 
 ## Phase 7.1B.4B verified requirements enrichment
 
@@ -506,9 +504,10 @@ The controlled-persistence order is now:
 10. one atomic controlled write.
 
 Filtered, untargeted, duplicate, and unselected candidates never call Gemini.
-An extraction failure removes that selected candidate from the write batch and
-does not pull in a nondeterministic replacement. Existing scheduled morning and
-evening tasks remain dry-run-only.
+An extraction failure blocks the entire selected write batch and does not pull
+in a nondeterministic replacement. Evening remains dry-run-only; the morning
+schedule can reach this verified extraction boundary only behind the Phase
+7.1B.5A DEVELOPMENT gate.
 
 Gemini is a candidate classifier, not the source of truth. Deterministic code
 owns candidate evidence and explicit salary/experience numbers. The model must
@@ -536,11 +535,68 @@ garden3d salary and PSA employment conflicts did not affect automated
 decisions. A subsequent dry-run made 0 Gemini calls, skipped all 14 unchanged
 hashes, and wrote nothing.
 
-This completed local reprocessing does not enable discovery persistence on a
-schedule. Morning and evening tasks remain DEVELOPMENT-only and DRY_RUN-only,
-and production persistence remains disabled. Gemini is not treated as
-infallible: the guarantee is strict fail-closed verification, not perfect
-extraction accuracy.
+This completed local reprocessing did not itself enable discovery persistence
+on a schedule. Phase 7.1B.5A later adds an independently gated DEVELOPMENT
+morning path; evening and production persistence remain disabled. Gemini is not
+treated as infallible: the guarantee is strict fail-closed verification, not
+perfect extraction accuracy.
+
+## Phase 7.1B.5A DEVELOPMENT morning scheduled persistence
+
+Phase 7.1B.5A preserves the existing morning task ID, `0 8 * * *`
+Asia/Manila cron, DEVELOPMENT-only registration, concurrency-one queue,
+30-minute TTL, and 600-second duration. Morning uses `maxAttempts: 1` and is
+dry-run by default. Controlled persistence requires all of these conditions:
+
+1. Trigger.dev reports the `DEVELOPMENT` environment.
+2. `JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED` is exactly lowercase `true`.
+3. The fixed morning task ID is executing.
+4. The Asia/Manila daily ledger has remaining capacity.
+
+The scheduled switch is intentionally separate from the manual controlled
+switch. Morning uses only the fixed `software_development` and `ai_automation`
+profiles and established retrieval hints; callers cannot provide alternate
+persistence controls.
+
+The additive `job_discovery_persistence_runs` table records a unique
+idempotency key, Philippine date, task ID, run kind, persisted count, and
+timestamps. Manual controlled runs and morning scheduled runs share a daily
+limit of five persisted jobs. Remaining capacity is rechecked in the same
+SQLite transaction as the ledger reservation, jobs, scores, verified
+extractions, and completion activity. A database trigger rejects a reservation
+that would take the PHT-date sum above five, preserving the cap across process
+restarts and racing writers that use this repository.
+
+The scheduled idempotency key is derived from the fixed task identity,
+`MORNING`, and Philippine calendar date. A repeat returns
+`ALREADY_COMPLETED` before provider or Gemini calls. An exhausted daily budget
+returns `DAILY_CAP_REACHED` at the same early boundary. Final database
+duplicates do not consume capacity. Any source or extraction failure produces
+no job, score, extraction, activity, or budget write.
+
+The evening task remains DEVELOPMENT-only and DRY_RUN-only and cannot reserve
+daily budget. Production persistence remains disabled. No applications,
+submissions, resumes, cover letters, messages, email, or browser automation are
+part of either controlled persistence path.
+
+The registered DEVELOPMENT validation run
+`run_06frj6g5id1v7jt47pv73m7e01` completed for Philippine date `2026-08-01`.
+It fetched 134 provider records and found zero matches for the fixed morning
+profiles, so it selected and persisted zero jobs and made zero Gemini calls.
+This is a valid safe outcome: jobs, scores, applications, and extractions were
+unchanged; activity increased once for the scheduled completion; and the
+ledger recorded zero persisted jobs with all five daily slots remaining. No
+duplicate identity, partial write, application, submission, or second run was
+created.
+
+The completed key
+`public-job-discovery-morning-dry-run:MORNING:2026-08-01` causes the normal
+later 8:00 AM execution on the same Philippine date to return
+`ALREADY_COMPLETED` before provider or Gemini calls. Focused coverage passed
+46/46; the full suite passed 489/489 across 41 files, workspace build passed
+6/6, standalone dashboard build and dashboard/ingestion strict TypeScript
+passed, and `git diff --check` passed. Additional daily morning runs should be
+monitored before evening persistence is considered.
 
 See `docs/JOB_REQUIREMENTS_EXTRACTION.md` for the detailed data model and
 verification contract.

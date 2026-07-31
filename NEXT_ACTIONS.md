@@ -1,7 +1,33 @@
 # Next Actions
 
 **Last updated:** 2026-08-01 PHT
-**Current state:** Phase 7.1B.4A-B is complete. The controlled DEVELOPMENT run persisted five bounded discovery candidates, and the single all-or-nothing existing-job reprocessing apply stored 14 verified extraction records. Current counts are jobs 14, scores 6, applications 0, activity 2, and job extractions 14. Spotify stores `Eastern Standard Time`; the unchanged-hash dry-run made 0 Gemini calls and 0 writes. Recurring schedules remain DEVELOPMENT-only/DRY_RUN-only and production persistence remains disabled.
+**Current state:** Phase 7.1B.5A is implemented and live-validated on top of completed Phase 7.1B.4A-B. DEVELOPMENT run `run_06frj6g5id1v7jt47pv73m7e01` fetched 134 jobs but found zero fixed-profile matches, so zero jobs and zero Gemini calls were valid safe outcomes. The completed PHT-date idempotency key blocks the later same-day 8:00 AM run. Jobs remain 14, scores 6, applications 0, extractions 14, and activity is now 3. Evening stays DRY_RUN-only and production persistence stays disabled.
+
+---
+
+## Monitor Phase 7.1B.5A before considering further scheduled persistence
+
+1. Preserve the existing morning task ID, `0 8 * * *` Asia/Manila schedule,
+   DEVELOPMENT-only environment, concurrency-one queue, and fixed
+   `software_development` + `ai_automation` profiles.
+2. Keep `JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED` absent by default. Only
+   the exact lowercase value `true` enables the scheduled morning controlled
+   path; do not store it in committed environment files.
+3. Keep the manual controlled switch
+   `JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED` independent. Both paths share
+   the persistent `job_discovery_persistence_runs` five-job PHT-day budget.
+4. Preserve atomic budget reservation with job/score/extraction/activity
+   writes. A failed source or extraction consumes no capacity, and duplicate
+   or concurrent invocations must never raise the daily total above five.
+5. Keep the evening schedule DRY_RUN-only and production persistence disabled.
+6. Preserve the completed validation run
+   `run_06frj6g5id1v7jt47pv73m7e01`: 134 fetched, zero profile matches, zero
+   selected/persisted, zero Gemini calls, and zero applications/submissions.
+   The zero-count ledger entry is intentional and blocks the later same-day
+   8:00 AM trigger using the fixed idempotency key.
+7. Monitor additional daily morning outcomes and daily-budget accounting before
+   proposing evening persistence. Any such expansion requires a separate
+   review; do not infer authorization from this morning-only phase.
 
 ---
 
@@ -43,11 +69,11 @@
    jobs 9→14, scores 6→7, applications 0→0, and activity log 0→1.
 2. Preserve the verified one-run boundary. Do not rerun the controlled task to
    force different source, scoring, or persistence outcomes.
-3. Keep the controlled-persistence kill switch disabled outside an explicitly
-   authorized DEVELOPMENT validation process. Do not persist it in an env file.
-4. Keep production persistence and recurring scheduled persistence disabled.
-5. Do not convert the controlled task into a recurring or production write
-   path without a separately reviewed phase.
+3. Keep the manual controlled-persistence kill switch disabled outside an
+   explicitly authorized DEVELOPMENT process. Do not persist it in an env file.
+4. Manual controlled writes and DEVELOPMENT morning scheduled writes must both
+   use the shared persistent five-job PHT-day budget.
+5. Keep production and evening persistence disabled.
 
 ## Existing implementation review references
 
@@ -92,9 +118,10 @@
    pnpm discovery:lever -- --company spotify --company highspot --company aleph --remote-only --query "developer" --limit 50
    ```
 
-9. Do not use any source's `--apply`. The only approved write boundary in this
-   phase is the dedicated, gated, one-time DEVELOPMENT validation task.
-10. Do not enable recurring scheduled or production persistence.
+9. Do not use any source's `--apply`. Approved discovery writes are limited to
+   the dedicated manual controlled task and the independently gated
+   DEVELOPMENT morning schedule; both share the persistent PHT-day cap.
+10. Do not enable evening or production persistence.
 11. Historical verification run `run_06fqigvi9p0np4a1o5csdrov01` exposed a
     Lever isolation defect: Spotify timed out and the old adapter did not
     attempt Highspot or Aleph. The adapter now isolates each configured company,
@@ -178,10 +205,14 @@
   evidence, dates, sections, stable posting ID, and canonical hosted URL.
   Salary, skills, experience, closing date, and country eligibility remain
   unknown.
-- Recurring discovery remains dry-run-only. Phase 7.1B.4A adds only one
-  unscheduled, manually triggered DEVELOPMENT persistence task with a
-  maximum-five cap; production persistence, recurring persistence, unattended
-  apply behavior, and application automation remain disabled.
+- The DEVELOPMENT morning schedule can persist only when its separate exact
+  process switch is enabled. It requires a running authenticated local worker
+  and shares a persistent five-job Asia/Manila daily budget with manual
+  controlled runs. The initial live validation safely persisted zero jobs
+  because it found zero profile matches; additional daily observations remain
+  necessary before considering any expansion. Evening and production
+  persistence, unattended source CLI apply behavior, and application
+  automation remain disabled.
 
 ---
 

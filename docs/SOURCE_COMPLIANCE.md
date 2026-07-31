@@ -3,6 +3,14 @@
 **IMPORTANT**: Only sources explicitly approved below are enabled. New sources
 must be documented before implementation.
 
+Phase 7.1B.5A live validation used only the approved Arbeitnow, Remotive, and
+configured Lever paths. DEVELOPMENT run `run_06frj6g5id1v7jt47pv73m7e01`
+fetched 134 records and persisted zero because no record matched the fixed
+morning profiles. No application or submission occurred. Evening remains
+DRY_RUN-only, production persistence remains disabled, and additional daily
+morning outcomes must be monitored before any broader scheduled persistence is
+considered.
+
 ## Source Documentation Template
 For every job board or data source, document the following before enabling:
 
@@ -35,9 +43,10 @@ For every job board or data source, document the following before enabling:
   authentication, CAPTCHA handling, rate-limit bypass, application creation, or
   submission.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
-  controlled-persistence validation. Recurring and production persistence
-  remain disabled.
+  dry runs, the separately gated manual controlled task, and the independently
+  gated Phase 7.1B.5A DEVELOPMENT morning path. Manual and morning writes share
+  a persistent five-job Asia/Manila daily cap. Evening and production
+  persistence remain disabled.
 
 ---
 
@@ -70,9 +79,10 @@ For every job board or data source, document the following before enabling:
   job boards, employer/application-link crawling, authentication, CAPTCHA
   handling, rate-limit bypass, application creation, or submission.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
-  controlled-persistence validation. Recurring and production persistence
-  remain disabled.
+  dry runs, the separately gated manual controlled task, and the independently
+  gated Phase 7.1B.5A DEVELOPMENT morning path. Manual and morning writes share
+  a persistent five-job Asia/Manila daily cap. Evening and production
+  persistence remain disabled.
 
 ---
 
@@ -119,7 +129,8 @@ For every job board or data source, document the following before enabling:
   employer-page crawling, browser automation, login, cookies, CAPTCHA handling,
   rate-limit bypass, or auto-application.
 - **Compliance Status**: Approved for manual and development-only Trigger.dev
-  dry runs, plus the separately gated Phase 7.1B.4A one-time DEVELOPMENT
-  controlled-persistence validation. Trigger orchestration attempts each
-  configured board at most once per run; recurring and production persistence
-  remain disabled.
+  dry runs, the separately gated manual controlled task, and the independently
+  gated Phase 7.1B.5A DEVELOPMENT morning path. Trigger orchestration attempts
+  each configured board at most once per run; manual and morning writes share a
+  persistent five-job Asia/Manila daily cap. Evening and production
+  persistence remain disabled.

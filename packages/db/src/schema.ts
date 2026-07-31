@@ -1,4 +1,11 @@
-import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  index,
+  check,
+} from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const jobs = sqliteTable('jobs', {
@@ -129,6 +136,28 @@ export const activity_log = sqliteTable('activity_log', {
     entityIdx: index('activity_log_entity_idx').on(table.entity_type, table.entity_id),
   };
 });
+
+export const job_discovery_persistence_runs = sqliteTable(
+  'job_discovery_persistence_runs',
+  {
+    idempotency_key: text('idempotency_key').primaryKey(),
+    philippine_date: text('philippine_date').notNull(),
+    task_id: text('task_id').notNull(),
+    run_kind: text('run_kind').notNull(),
+    persisted_job_count: integer('persisted_job_count').notNull(),
+    created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    philippineDateIdx: index(
+      'job_discovery_persistence_runs_ph_date_idx',
+    ).on(table.philippine_date),
+    persistedCountCheck: check(
+      'job_discovery_persistence_runs_count_check',
+      sql`${table.persisted_job_count} >= 0 AND ${table.persisted_job_count} <= 5`,
+    ),
+  }),
+);
 
 export const blacklist = sqliteTable('blacklist', {
   id: integer('id').primaryKey({ autoIncrement: true }),

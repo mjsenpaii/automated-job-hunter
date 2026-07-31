@@ -5,6 +5,8 @@ import { getDb } from '@job-app/db/connection';
 import {
   activity_log,
   applications,
+  job_discovery_persistence_runs,
+  job_extractions,
   jobs,
   job_scores,
 } from '@job-app/db/schema';
@@ -19,7 +21,12 @@ import {
   ControlledPersistenceGateError,
   ControlledPublicJobDiscoveryPayloadSchema,
   isControlledPersistenceKillSwitchEnabled,
+  isScheduledPersistenceKillSwitchEnabled,
+  philippineCalendarDate,
   runControlledPublicJobDiscovery,
+  runScheduledMorningPublicJobDiscoveryPersistence,
+  scheduledMorningPersistenceIdempotencyKey,
+  SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
 } from '../src/discovery/orchestration.js';
 import { createDiscoveryRepository } from '../src/discovery/repository.js';
 import { ingestJob } from '../src/pipeline.js';
@@ -170,12 +177,26 @@ function inertRepository(): ControlledDiscoveryRepository {
       return [];
     },
     persistBatch: vi.fn(),
+    async getDailyPersistenceState({ philippineDate }) {
+      return {
+        philippineDate,
+        dailyLimit: 5,
+        persistedCount: 0,
+        remaining: 5,
+        idempotencyStatus: 'NOT_STARTED' as const,
+      };
+    },
     persistControlledBatch: vi.fn(async () => ({
       idempotencyStatus: 'NEW' as const,
       jobsPersisted: 0,
       scoresPersisted: 0,
       finalDatabaseDuplicates: 0,
       persistedRecords: [],
+      persistedBeforeRun: 0,
+      remainingBeforeRun: 5,
+      persistedAfterRun: 0,
+      dailyRemaining: 5,
+      skippedBecauseOfDailyCap: 0,
     })),
   };
 }
@@ -294,6 +315,39 @@ describe('controlled public-job persistence', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('requires the exact scheduled-persistence kill switch value', () => {
+    expect(isScheduledPersistenceKillSwitchEnabled(undefined)).toBe(false);
+    expect(isScheduledPersistenceKillSwitchEnabled('')).toBe(false);
+    expect(isScheduledPersistenceKillSwitchEnabled('false')).toBe(false);
+    expect(isScheduledPersistenceKillSwitchEnabled('TRUE')).toBe(false);
+    expect(isScheduledPersistenceKillSwitchEnabled(' true ')).toBe(false);
+    expect(isScheduledPersistenceKillSwitchEnabled('true')).toBe(true);
+  });
+
+  it('rejects scheduled persistence outside DEVELOPMENT before fetching', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      runScheduledMorningPublicJobDiscoveryPersistence({
+        ...dependencies(inertRepository(), fetchImpl as typeof fetch),
+        environmentType: 'PRODUCTION',
+        taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      }),
+    ).rejects.toMatchObject({ code: 'NON_DEVELOPMENT_ENVIRONMENT' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects scheduled persistence when its independent switch is disabled', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      runScheduledMorningPublicJobDiscoveryPersistence({
+        ...dependencies(inertRepository(), fetchImpl as typeof fetch),
+        killSwitchEnabled: false,
+        taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      }),
+    ).rejects.toMatchObject({ code: 'KILL_SWITCH_DISABLED' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects calls from any task other than the dedicated task', async () => {
     await expect(
       runControlledPublicJobDiscovery(VALID_PAYLOAD, {
@@ -378,6 +432,157 @@ describe('controlled public-job persistence', () => {
     expect(database.select().from(activity_log).all()).toHaveLength(1);
   });
 
+  it('runs the enabled morning schedule with fixed profiles and a five-job daily cap', async () => {
+    const database = getDb(':memory:');
+    const result = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(
+        createDiscoveryRepository(database),
+        controlledFetch([arbeitnowRecord(1), arbeitnowRecord(2)]),
+      ),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+    });
+
+    expect(result).toMatchObject({
+      mode: 'CONTROLLED',
+      runKind: 'SCHEDULED_MORNING',
+      scheduleGroup: 'MORNING',
+      philippineDate: '2026-07-29',
+      dailyLimit: 5,
+      persistedBeforeRun: 0,
+      remainingBeforeRun: 5,
+      selected: 2,
+      persistedThisRun: 2,
+      persistedAfterRun: 2,
+      dailyRemaining: 3,
+      finalStatus: 'COMPLETED',
+      activeProfileIds: ['software_development', 'ai_automation'],
+      applicationsCreated: 0,
+      submissionsCreated: 0,
+    });
+    expect(database.select().from(jobs).all()).toHaveLength(2);
+    expect(database.select().from(applications).all()).toHaveLength(0);
+  });
+
+  it('shares the Philippine daily budget between manual and scheduled runs', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    const first = await runControlledPublicJobDiscovery(
+      { ...VALID_PAYLOAD, maxJobsToPersist: 3, idempotencyKey: 'manual-three' },
+      dependencies(
+        repository,
+        controlledFetch(Array.from({ length: 3 }, (_, index) => arbeitnowRecord(index + 1))),
+      ),
+    );
+    const second = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(
+        repository,
+        controlledFetch(Array.from({ length: 5 }, (_, index) => arbeitnowRecord(index + 4))),
+      ),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+    });
+
+    expect(first.persistedThisRun).toBe(3);
+    expect(second).toMatchObject({
+      persistedBeforeRun: 3,
+      remainingBeforeRun: 2,
+      selectedForPersistence: 2,
+      persistedThisRun: 2,
+      persistedAfterRun: 5,
+      dailyRemaining: 0,
+    });
+    expect(database.select().from(jobs).all()).toHaveLength(5);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all()
+        .reduce((sum, row) => sum + row.persisted_job_count, 0),
+    ).toBe(5);
+  });
+
+  it('performs no provider or Gemini calls when the daily cap is exhausted', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    await runControlledPublicJobDiscovery(
+      { ...VALID_PAYLOAD, idempotencyKey: 'fill-daily-cap' },
+      dependencies(
+        repository,
+        controlledFetch(Array.from({ length: 5 }, (_, index) => arbeitnowRecord(index + 1))),
+      ),
+    );
+    const fetchImpl = vi.fn();
+    const requirementsExtractor = vi.fn();
+    const result = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(repository, fetchImpl as typeof fetch),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      requirementsExtractor,
+    });
+
+    expect(result).toMatchObject({
+      finalStatus: 'DAILY_CAP_REACHED',
+      persistedBeforeRun: 5,
+      remainingBeforeRun: 0,
+      persistedThisRun: 0,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(requirementsExtractor).not.toHaveBeenCalled();
+  });
+
+  it('returns ALREADY_COMPLETED before provider or Gemini calls for a same-day duplicate', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(repository, controlledFetch([arbeitnowRecord(1)])),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+    });
+    const fetchImpl = vi.fn();
+    const requirementsExtractor = vi.fn();
+    const duplicate = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(repository, fetchImpl as typeof fetch),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      requirementsExtractor,
+    });
+
+    expect(duplicate.finalStatus).toBe('ALREADY_COMPLETED');
+    expect(duplicate.idempotencyStatus).toBe('ALREADY_COMPLETED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(requirementsExtractor).not.toHaveBeenCalled();
+    expect(database.select().from(activity_log).all()).toHaveLength(1);
+  });
+
+  it('uses a fresh budget and idempotency key on the next Philippine day', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    const dayOne = dependencies(repository, controlledFetch([arbeitnowRecord(1)]));
+    const first = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dayOne,
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+    });
+    const second = await runScheduledMorningPublicJobDiscoveryPersistence({
+      ...dependencies(repository, controlledFetch([arbeitnowRecord(2)])),
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      now: () => new Date('2026-07-29T16:00:00.000Z'),
+    });
+
+    expect(first.philippineDate).toBe('2026-07-29');
+    expect(second).toMatchObject({
+      philippineDate: '2026-07-30',
+      persistedBeforeRun: 0,
+      persistedThisRun: 1,
+    });
+    expect(
+      scheduledMorningPersistenceIdempotencyKey(first.philippineDate),
+    ).not.toBe(
+      scheduledMorningPersistenceIdempotencyKey(second.philippineDate),
+    );
+  });
+
+  it('resolves Philippine dates correctly at the UTC day boundary', () => {
+    expect(
+      philippineCalendarDate(new Date('2026-08-01T15:59:59.999Z')),
+    ).toBe('2026-08-01');
+    expect(
+      philippineCalendarDate(new Date('2026-08-01T16:00:00.000Z')),
+    ).toBe('2026-08-02');
+  });
+
   it('calls requirements extraction once per selected unique candidate and never above five', async () => {
     const database = getDb(':memory:');
     const base = dependencies(
@@ -425,7 +630,7 @@ describe('controlled public-job persistence', () => {
     expect(result.jobsPersisted).toBe(0);
   });
 
-  it('fails closed without replacement when extraction fails', async () => {
+  it('fails closed atomically without replacement when extraction fails', async () => {
     const database = getDb(':memory:');
     const base = dependencies(
       createDiscoveryRepository(database),
@@ -450,10 +655,17 @@ describe('controlled public-job persistence', () => {
       selectedForPersistence: 2,
       selectedAfterExtraction: 1,
       extractionFailed: 1,
-      jobsPersisted: 1,
+      jobsPersisted: 0,
+      finalStatus: 'EXTRACTION_FAILED',
     });
     expect(JSON.stringify(result)).not.toContain('private provider diagnostic');
-    expect(database.select().from(jobs).all()).toHaveLength(1);
+    expect(database.select().from(jobs).all()).toHaveLength(0);
+    expect(database.select().from(job_scores).all()).toHaveLength(0);
+    expect(database.select().from(job_extractions).all()).toHaveLength(0);
+    expect(database.select().from(activity_log).all()).toHaveLength(0);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all(),
+    ).toHaveLength(0);
   });
 
   it('uses the activity ledger to make a repeated key write-idempotent', async () => {
@@ -523,9 +735,120 @@ describe('controlled public-job persistence', () => {
       repository.persistControlledBatch(records, {
         idempotencyKey: 'repository-limit-test',
         maxJobsToPersist: 5,
+        philippineDate: '2026-07-29',
+        taskId: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+        runKind: 'MANUAL_CONTROLLED',
       }),
     ).rejects.toThrow(/more records than the approved limit/);
     expect(database.select().from(jobs).all()).toHaveLength(0);
+  });
+
+  it('atomically caps repeated repository writes at five for one Philippine date', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    const firstRecords = await Promise.all([
+      persistenceRecord(1),
+      persistenceRecord(2),
+      persistenceRecord(3),
+    ]);
+    const secondRecords = await Promise.all([
+      persistenceRecord(4),
+      persistenceRecord(5),
+      persistenceRecord(6),
+    ]);
+
+    const first = await repository.persistControlledBatch(firstRecords, {
+      idempotencyKey: 'daily-budget-first',
+      maxJobsToPersist: 3,
+      philippineDate: '2026-07-29',
+      taskId: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      runKind: 'MANUAL_CONTROLLED',
+    });
+    const second = await repository.persistControlledBatch(secondRecords, {
+      idempotencyKey: 'daily-budget-second',
+      maxJobsToPersist: 3,
+      philippineDate: '2026-07-29',
+      taskId: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      runKind: 'SCHEDULED_MORNING',
+    });
+
+    expect(first.jobsPersisted).toBe(3);
+    expect(second).toMatchObject({
+      persistedBeforeRun: 3,
+      remainingBeforeRun: 2,
+      jobsPersisted: 2,
+      persistedAfterRun: 5,
+      dailyRemaining: 0,
+      skippedBecauseOfDailyCap: 1,
+    });
+    expect(database.select().from(jobs).all()).toHaveLength(5);
+    expect(database.select().from(job_scores).all()).toHaveLength(5);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all()
+        .reduce((sum, row) => sum + row.persisted_job_count, 0),
+    ).toBe(5);
+  });
+
+  it('enforces the daily ceiling inside SQLite even when callers race past preflight', () => {
+    const database = getDb(':memory:');
+    database.insert(job_discovery_persistence_runs).values({
+      idempotency_key: 'database-cap-first',
+      philippine_date: '2026-07-29',
+      task_id: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      run_kind: 'MANUAL_CONTROLLED',
+      persisted_job_count: 3,
+    }).run();
+
+    expect(() =>
+      database.insert(job_discovery_persistence_runs).values({
+        idempotency_key: 'database-cap-racing-second',
+        philippine_date: '2026-07-29',
+        task_id: SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID,
+        run_kind: 'SCHEDULED_MORNING',
+        persisted_job_count: 3,
+      }).run(),
+    ).toThrow(/daily persistence limit exceeded/);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all()
+        .reduce((sum, row) => sum + row.persisted_job_count, 0),
+    ).toBe(3);
+  });
+
+  it('blocks all persistence when any discovery source fails', async () => {
+    const database = getDb(':memory:');
+    const repository = createDiscoveryRepository(database);
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('arbeitnow.com')) {
+        throw new Error('private network diagnostic');
+      }
+      if (url.includes('remotive.com')) {
+        return Response.json({
+          '0-legal-notice': 'Test fixture.',
+          'job-count': 0,
+          jobs: [],
+        });
+      }
+      if (url.includes('api.lever.co')) return Response.json([]);
+      throw new Error('Unexpected test URL.');
+    }) as typeof fetch;
+    const base = dependencies(repository, fetchImpl);
+    const requirementsExtractor = vi.fn(base.requirementsExtractor);
+    const result = await runControlledPublicJobDiscovery(
+      { ...VALID_PAYLOAD, idempotencyKey: 'source-failure-no-write' },
+      { ...base, requirementsExtractor },
+    );
+
+    expect(result.finalStatus).toBe('SOURCE_FAILED');
+    expect(result.jobsPersisted).toBe(0);
+    expect(requirementsExtractor).not.toHaveBeenCalled();
+    expect(database.select().from(jobs).all()).toHaveLength(0);
+    expect(database.select().from(job_extractions).all()).toHaveLength(0);
+    expect(database.select().from(activity_log).all()).toHaveLength(0);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all(),
+    ).toHaveLength(0);
+    expect(JSON.stringify(result)).not.toContain('private network diagnostic');
   });
 
   it('rolls back jobs, scores, and idempotency ledger atomically', async () => {
@@ -550,11 +873,18 @@ describe('controlled public-job persistence', () => {
       repository.persistControlledBatch(records, {
         idempotencyKey: 'atomic-rollback-test',
         maxJobsToPersist: 2,
+        philippineDate: '2026-07-29',
+        taskId: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+        runKind: 'MANUAL_CONTROLLED',
       }),
     ).rejects.toThrow();
     expect(database.select().from(jobs).all()).toHaveLength(0);
     expect(database.select().from(job_scores).all()).toHaveLength(0);
+    expect(database.select().from(job_extractions).all()).toHaveLength(0);
     expect(database.select().from(activity_log).all()).toHaveLength(0);
+    expect(
+      database.select().from(job_discovery_persistence_runs).all(),
+    ).toHaveLength(0);
   });
 
   it('returns no descriptions, secrets, raw errors, or provider payloads', async () => {
