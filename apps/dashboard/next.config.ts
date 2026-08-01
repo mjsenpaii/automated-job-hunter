@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
   // their real `.js` files directly — no source transpilation or `.js`→`.ts` aliasing needed.
   // Prerequisite: build the workspace packages (`pnpm build`) before `next build`/`next dev`.
   // `pnpm build` (Turbo) does this automatically via `dependsOn: ["^build"]`.
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "@job-app/ingestion"],
   async redirects() {
     return [
       {

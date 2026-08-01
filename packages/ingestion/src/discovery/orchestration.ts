@@ -12,6 +12,13 @@ import {
   RemotiveAdapter,
   RemotiveDiscoveryError,
 } from '../adapters/remotive.js';
+import { TavilyDiscoveryError } from '../adapters/tavily.js';
+import {
+  CombinedWebDiscoveryAdapter,
+  type CombinedWebDiscoveryOptions,
+  type CombinedWebDiscoveryStage,
+} from '../adapters/combined-web-discovery.js';
+import type { GeminiSearchClientFactory } from '../adapters/gemini-web-search.server.js';
 import type {
   ControlledDiscoveryRepository,
   ControlledPersistenceIdempotencyStatus,
@@ -24,7 +31,12 @@ import type {
   DiscoveryRepository,
   DiscoveryRunSummary,
   DiscoverySourceAdapter,
+  DiscoveryProcessingStage,
+  TavilyFetchReport,
+  WebDiscoveryReport,
 } from './contracts.js';
+import type { DiscoveryDiagnosticCollector } from './profile-coverage-diagnostics.js';
+import type { GeminiSearchProviderFailureCategory } from './gemini-search-contracts.js';
 import {
   getEnabledJobSearchProfileIds,
   getJobSearchProfileDisplayName,
@@ -39,6 +51,7 @@ import {
   defaultDatabasePath,
   defaultSkillsPath,
   loadVerifiedSkills,
+  resolveWebDiscoveryDatabasePath,
 } from './runtime.js';
 import {
   finalizeDiscoveryDeduplicationContext,
@@ -50,6 +63,24 @@ import {
   enrichControlledPersistenceCandidate,
   type DiscoveryRequirementsExtractor,
 } from '../controlled-job-requirements.js';
+import type { GeminiRequirementsTokenUsage } from '../gemini-job-requirements.server.js';
+import {
+  DASHBOARD_PUBLIC_JOB_SCAN_TASK_ID,
+  DashboardJobScanPayloadSchema,
+} from './dashboard-scan-contracts.js';
+import {
+  PUBLIC_JOB_DISCOVERY_SOURCE_IDS,
+  hasEnabledDiscoverySource,
+  resolvePublicJobDiscoverySourceConfiguration,
+  type PublicJobDiscoverySourceConfiguration,
+} from './source-configuration.js';
+import type { TavilySearchStore } from './tavily-search-store.js';
+import {
+  createSqliteWebDiscoveryStore,
+  resolveWebDiscoveryQuotaCaps,
+  type WebDiscoveryStore,
+} from './web-discovery-store.js';
+import type { resolveHostToPublicIps } from '../adapters/url-extractor.js';
 
 const DEFAULT_LEVER_COMPANIES = ['spotify', 'highspot', 'aleph'] as const;
 
@@ -78,6 +109,8 @@ export const PublicJobDiscoveryDryRunPayloadSchema = z
       .default([...DEFAULT_LEVER_COMPANIES]),
     profileIds: JobSearchProfileIdListSchema.optional(),
     scheduleGroup: z.enum(['MORNING', 'EVENING']).optional(),
+    cacheStrategy: z.enum(['CACHED', 'FRESH']).default('CACHED'),
+    confirmRecentlyExhausted: z.boolean().default(false),
   })
   .strict();
 export type PublicJobDiscoveryDryRunPayload = z.infer<
@@ -92,8 +125,16 @@ export const SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_TASK_ID =
   'public-job-discovery-morning-dry-run';
 export const SCHEDULED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH =
   'JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED';
-export const PUBLIC_JOB_DISCOVERY_DAILY_LIMIT = 5 as const;
-export const PUBLIC_JOB_DISCOVERY_TIMEZONE = 'Asia/Manila' as const;
+export { PUBLIC_JOB_DISCOVERY_DAILY_LIMIT } from './limits.js';
+import { PUBLIC_JOB_DISCOVERY_DAILY_LIMIT } from './limits.js';
+export {
+  philippineCalendarDate,
+  PUBLIC_JOB_DISCOVERY_TIMEZONE,
+} from './philippine-time.js';
+import {
+  philippineCalendarDate,
+  PUBLIC_JOB_DISCOVERY_TIMEZONE,
+} from './philippine-time.js';
 
 export const ControlledPublicJobDiscoveryPayloadSchema = z
   .object({
@@ -144,6 +185,20 @@ export const ControlledSourceFailureCodeSchema = z.enum([
   'INVALID_RESPONSE',
   'NETWORK_ERROR',
   'UNKNOWN_SAFE_ERROR',
+  'MISSING_API_KEY',
+  'DAILY_CREDIT_LIMIT_REACHED',
+  'MONTHLY_CREDIT_LIMIT_REACHED',
+  'TAVILY_DAILY_CREDIT_LIMIT_REACHED',
+  'TAVILY_MONTHLY_CREDIT_LIMIT_REACHED',
+  'DAILY_PROMPT_LIMIT_REACHED',
+  'QUERY_GROUPS_RECENTLY_EXHAUSTED',
+  'QUERY_IN_FLIGHT',
+  'PROMPT_IN_FLIGHT',
+  'API_ERROR',
+  'INVALID_GROUNDING_RESPONSE',
+  'EXTRACT_FAILED',
+  'PAGE_FETCH_FAILED',
+  'PAGE_REJECTED',
 ]);
 export type ControlledSourceFailureCode = z.infer<
   typeof ControlledSourceFailureCodeSchema
@@ -152,7 +207,15 @@ export type ControlledSourceFailureCode = z.infer<
 export interface ControlledSourceFailure {
   source: PublicJobDiscoverySourceName;
   code: ControlledSourceFailureCode;
+  provider?: 'TAVILY_SEARCH' | 'GEMINI_SEARCH' | 'TAVILY_EXTRACT';
+  providerCategory?: GeminiSearchProviderFailureCategory;
+  providerStatus?: number | null;
+  requestReachedProvider?: boolean;
+  quotaReserved?: boolean;
+  quotaReleased?: boolean;
+  groundedUrlsReturned?: number;
   companyId?: string;
+  queryId?: string;
 }
 
 export interface ControlledPersistedJobPreview {
@@ -168,7 +231,7 @@ export interface ControlledPublicJobDiscoveryResult {
   mode: 'CONTROLLED';
   environment: 'DEVELOPMENT';
   scheduleGroup: 'MORNING' | 'EVENING';
-  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING';
+  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING' | 'DASHBOARD_SCAN';
   philippineDate: string;
   dailyLimit: 5;
   persistedBeforeRun: number;
@@ -182,7 +245,10 @@ export interface ControlledPublicJobDiscoveryResult {
     | 'ALREADY_COMPLETED'
     | 'DAILY_CAP_REACHED'
     | 'SOURCE_FAILED'
-    | 'EXTRACTION_FAILED';
+    | 'EXTRACTION_FAILED'
+    | 'QUERY_GROUPS_RECENTLY_EXHAUSTED'
+    | 'CANCELLED'
+    | 'NO_DISCOVERY_SOURCES_ENABLED';
   activeProfileIds: JobSearchProfileId[];
   persistenceGates: {
     developmentEnvironment: true;
@@ -220,14 +286,20 @@ export class PublicJobDiscoveryValidationError extends Error {
 }
 
 export type PublicJobDiscoverySourceName =
+  | 'tavily'
   | 'arbeitnow'
   | 'remotive'
   | 'lever';
 
 export type PublicJobDiscoverySourceStatus =
+  | 'ENABLED'
   | 'SUCCESS'
   | 'PARTIAL_SUCCESS'
-  | 'FAILED';
+  | 'FAILED'
+  | 'DISABLED'
+  | 'CACHED'
+  | 'DAILY_LIMIT_REACHED'
+  | 'MONTHLY_LIMIT_REACHED';
 
 export interface PublicJobDiscoverySourceError {
   code: string;
@@ -241,6 +313,7 @@ export interface PublicJobDiscoverySourceResult {
   invalidRecords: number;
   excludedByFilters: number;
   duplicates: number;
+  profileMatchedDuplicates: number;
   hardRejectedJobs: number;
   eligibleScoredJobs: number;
   pipelineErrors: number;
@@ -257,6 +330,8 @@ export interface PublicJobDiscoverySourceResult {
   vibeCodingRolesFound?: number;
   preview: DiscoveryPreview[];
   profileStats?: DiscoveryProfileStats[];
+  tavily?: TavilyFetchReport;
+  web?: WebDiscoveryReport;
   error?: PublicJobDiscoverySourceError;
 }
 
@@ -288,6 +363,7 @@ export interface PublicJobDiscoveryProfileSummary {
 
 export interface PublicJobDiscoveryDryRunResult {
   mode: 'DRY_RUN';
+  finalStatus: 'COMPLETED' | 'NO_DISCOVERY_SOURCES_ENABLED';
   startedAt: string;
   completedAt: string;
   query: string;
@@ -312,6 +388,18 @@ export interface PublicJobDiscoveryDryRunDependencies {
   skillsPath?: string;
   now?: () => Date;
   onSourceStart?: (source: PublicJobDiscoverySourceName) => void;
+  diagnosticCollector?: DiscoveryDiagnosticCollector;
+  onProcessingStage?: (stage: DiscoveryProcessingStage) => void;
+  sourceEnvironment?: Readonly<Record<string, string | undefined>>;
+  tavilyApiKey?: string;
+  geminiApiKey?: string;
+  geminiSearchModel?: string;
+  tavilySearchStore?: TavilySearchStore;
+  webDiscoveryStore?: WebDiscoveryStore;
+  webScanOptions?: Partial<CombinedWebDiscoveryOptions>;
+  geminiSearchClientFactory?: GeminiSearchClientFactory;
+  onWebDiscoveryStage?: (stage: CombinedWebDiscoveryStage) => void;
+  resolveHost?: typeof resolveHostToPublicIps;
 }
 
 export interface ControlledPublicJobDiscoveryDependencies
@@ -321,6 +409,9 @@ export interface ControlledPublicJobDiscoveryDependencies
   taskId: string;
   repository?: ControlledDiscoveryRepository;
   requirementsExtractor?: DiscoveryRequirementsExtractor;
+  onRequirementsExtractionStart?: () => void;
+  onGeminiUsage?: (usage: GeminiRequirementsTokenUsage) => void;
+  onPersistenceStart?: () => void;
 }
 
 export interface ScheduledMorningPublicJobDiscoveryDependencies
@@ -344,6 +435,8 @@ const fixedDiscoveryBasePayload = {
   remotiveLimit: 50,
   leverLimit: 50,
   leverCompanies: [...DEFAULT_LEVER_COMPANIES],
+  cacheStrategy: 'FRESH',
+  confirmRecentlyExhausted: false,
 } satisfies PublicJobDiscoveryDryRunPayload;
 
 export function fixedPublicJobDiscoveryPayloadForSchedule(
@@ -376,33 +469,6 @@ export function isScheduledPersistenceKillSwitchEnabled(
   value: string | undefined,
 ): boolean {
   return value === 'true';
-}
-
-export function philippineCalendarDate(instant: Date): string {
-  if (Number.isNaN(instant.getTime())) {
-    throw new ControlledPersistenceGateError(
-      'INVALID_PAYLOAD',
-      'Scheduled timestamp is invalid.',
-    );
-  }
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: PUBLIC_JOB_DISCOVERY_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(instant);
-  const value = (type: 'year' | 'month' | 'day') =>
-    parts.find((part) => part.type === type)?.value;
-  const year = value('year');
-  const month = value('month');
-  const day = value('day');
-  if (!year || !month || !day) {
-    throw new ControlledPersistenceGateError(
-      'INVALID_PAYLOAD',
-      'Unable to resolve the Philippine calendar date.',
-    );
-  }
-  return `${year}-${month}-${day}`;
 }
 
 export function scheduledMorningPersistenceIdempotencyKey(
@@ -447,6 +513,24 @@ function resolveLeverCompanySelection(
   }
 }
 
+function effectiveSourceConfiguration(
+  payload: PublicJobDiscoveryDryRunPayload,
+  dependencies: PublicJobDiscoveryDryRunDependencies,
+): PublicJobDiscoverySourceConfiguration {
+  const configured = resolvePublicJobDiscoverySourceConfiguration(
+    dependencies.sourceEnvironment,
+  );
+  return {
+    tavily: configured.tavily,
+    geminiSearch: configured.geminiSearch,
+    tavilyExtract: configured.tavilyExtract,
+    deepScan: configured.deepScan,
+    arbeitnow: configured.arbeitnow && payload.arbeitnowEnabled,
+    remotive: configured.remotive && payload.remotiveEnabled,
+    lever: configured.lever && payload.leverEnabled,
+  };
+}
+
 function emptySourceResult(
   status: PublicJobDiscoverySourceStatus,
   error?: PublicJobDiscoverySourceError,
@@ -458,6 +542,7 @@ function emptySourceResult(
     invalidRecords: 0,
     excludedByFilters: 0,
     duplicates: 0,
+    profileMatchedDuplicates: 0,
     hardRejectedJobs: 0,
     eligibleScoredJobs: 0,
     pipelineErrors: 0,
@@ -484,6 +569,9 @@ function mapSourceError(error: unknown): PublicJobDiscoverySourceError {
   if (error instanceof LeverDiscoveryError) {
     return { code: error.code, message: error.message };
   }
+  if (error instanceof TavilyDiscoveryError) {
+    return { code: error.code, message: error.message };
+  }
   return {
     code: 'SOURCE_UNAVAILABLE',
     message: 'The discovery source failed safely. No jobs were persisted.',
@@ -494,13 +582,49 @@ function mapSummaryToSourceResult(
   summary: DiscoveryRunSummary,
 ): PublicJobDiscoverySourceResult {
   const companyReport = summary.companyFetchReport;
+  const tavilyReport = summary.tavilyFetchReport;
+  const webReport = summary.webDiscoveryReport;
+  const webProviderStatuses = webReport
+    ? [webReport.tavilySearch.status, webReport.geminiSearch.status].filter(
+        (candidate) => candidate !== 'DISABLED',
+      )
+    : [];
+  const webAllUnavailable = webProviderStatuses.length > 0 &&
+    webProviderStatuses.every((candidate) =>
+      ['FAILED', 'DAILY_LIMIT_REACHED', 'MONTHLY_LIMIT_REACHED'].includes(candidate),
+    );
   const status: PublicJobDiscoverySourceStatus = companyReport
     ? companyReport.failedCompanies.length === 0
       ? 'SUCCESS'
       : companyReport.successfulCompanies.length > 0
         ? 'PARTIAL_SUCCESS'
         : 'FAILED'
-    : 'SUCCESS';
+    : webReport
+      ? webAllUnavailable
+        ? webProviderStatuses.includes('MONTHLY_LIMIT_REACHED')
+          ? 'MONTHLY_LIMIT_REACHED'
+          : webProviderStatuses.every((candidate) => candidate === 'DAILY_LIMIT_REACHED')
+            ? 'DAILY_LIMIT_REACHED'
+            : 'FAILED'
+        : webReport.tavilySearch.status === 'CACHED' &&
+            webReport.geminiSearch.status === 'CACHED'
+          ? 'CACHED'
+          : webReport.tavilySearch.sourceFailures.length > 0 ||
+                webReport.geminiSearch.sourceFailures.length > 0 ||
+                webReport.tavilyExtract.sourceFailures.length > 0
+              ? 'PARTIAL_SUCCESS'
+              : 'SUCCESS'
+    : tavilyReport
+      ? tavilyReport.searchesCompleted > 0
+        ? tavilyReport.sourceFailures.length > 0
+          ? 'PARTIAL_SUCCESS'
+          : tavilyReport.cacheHits > 0 && tavilyReport.creditsConsumed === 0
+            ? 'CACHED'
+            : 'SUCCESS'
+        : tavilyReport.dailyLimitReached
+          ? 'DAILY_LIMIT_REACHED'
+          : 'FAILED'
+      : 'SUCCESS';
   return {
     status,
     sourceRecordsFetched: summary.sourceRecordsFetched,
@@ -508,6 +632,7 @@ function mapSummaryToSourceResult(
     invalidRecords: summary.invalidRecords,
     excludedByFilters: summary.excludedByFilters,
     duplicates: summary.duplicates,
+    profileMatchedDuplicates: summary.profileMatchedDuplicates ?? 0,
     hardRejectedJobs: summary.hardRejectedJobs,
     eligibleScoredJobs: summary.eligibleScoredJobs,
     pipelineErrors: summary.pipelineErrors,
@@ -526,6 +651,8 @@ function mapSummaryToSourceResult(
           failedCompanies: companyReport.failedCompanies,
         }
       : {}),
+    ...(tavilyReport ? { tavily: { ...tavilyReport } } : {}),
+    ...(webReport ? { web: webReport } : {}),
     untargeted: summary.untargeted,
     vibeCodingRolesFound: summary.vibeCodingRolesFound,
     preview: summary.preview.slice(0, 5),
@@ -540,7 +667,14 @@ function mapSummaryToSourceResult(
             message: 'All configured Lever boards failed safely.',
           },
         }
-      : {}),
+      : status === 'FAILED' && tavilyReport
+        ? {
+            error: {
+              code: tavilyReport.sourceFailures[0]?.code ?? 'SOURCE_UNAVAILABLE',
+              message: 'Tavily discovery failed safely.',
+            },
+          }
+        : {}),
   };
 }
 
@@ -776,12 +910,16 @@ async function runSourceDiscovery(
   repository: DiscoveryRepository,
   verifiedSkills: SkillEntry[],
   deduplicationContext: DiscoveryDeduplicationContext,
+  diagnosticCollector?: DiscoveryDiagnosticCollector,
+  onProcessingStage?: (stage: DiscoveryProcessingStage) => void,
 ): Promise<DiscoveryRunSummary> {
   return runDiscovery(options, {
     adapter,
     repository,
     verifiedSkills,
     deduplicationContext,
+    diagnosticCollector,
+    onProcessingStage,
   });
 }
 
@@ -791,10 +929,15 @@ async function evaluatePublicJobDiscovery(
   repository: DiscoveryRepository,
 ): Promise<PublicJobDiscoveryEvaluation> {
   const activeProfileIds = resolveActiveProfileIds(payload);
+  const sourceConfiguration = effectiveSourceConfiguration(
+    payload,
+    dependencies,
+  );
   const retrievalHints = payload.scheduleGroup
     ? getScheduleRetrievalHints(payload.scheduleGroup)
     : null;
   const startedAt = (dependencies.now ?? (() => new Date()))().toISOString();
+  const now = dependencies.now ?? (() => new Date());
   const skillsPath = dependencies.skillsPath ?? defaultSkillsPath();
   const verifiedSkills =
     dependencies.verifiedSkills ?? loadVerifiedSkills(skillsPath);
@@ -807,8 +950,19 @@ async function evaluatePublicJobDiscovery(
     Record<PublicJobDiscoverySourceName, DiscoveryRunSummary>
   > = {};
 
+  for (const sourceName of PUBLIC_JOB_DISCOVERY_SOURCE_IDS) {
+    const enabled = sourceName === 'tavily'
+      ? sourceConfiguration.tavily || sourceConfiguration.geminiSearch
+      : sourceConfiguration[sourceName];
+    if (!enabled) {
+      sources[sourceName] = emptySourceResult('DISABLED');
+    }
+  }
+  const anySourceEnabled = hasEnabledDiscoverySource(sourceConfiguration);
   const deduplicationContext: DiscoveryDeduplicationContext = {
-    knownJobs: [...(await repository.loadExistingJobs())],
+    knownJobs: anySourceEnabled
+      ? [...(await repository.loadExistingJobs())]
+      : [],
   };
     const sharedOptions = {
       remoteOnly: payload.remoteOnly,
@@ -819,7 +973,95 @@ async function evaluatePublicJobDiscovery(
       activeProfileIds,
     };
 
-    if (payload.arbeitnowEnabled) {
+    if (sourceConfiguration.tavily || sourceConfiguration.geminiSearch) {
+      dependencies.onSourceStart?.('tavily');
+      const ownedStore = dependencies.webDiscoveryStore
+        ? null
+        : createSqliteWebDiscoveryStore(
+            resolveWebDiscoveryDatabasePath({
+              databasePath: dependencies.databasePath,
+              repositoryInjected: Boolean(dependencies.repository),
+            }),
+          );
+      const webStore = dependencies.webDiscoveryStore ?? ownedStore;
+      if (!webStore) {
+        sources.tavily = emptySourceResult('FAILED', {
+          code: 'SOURCE_UNAVAILABLE',
+          message: 'Public web discovery could not initialize safely.',
+        });
+      } else {
+        try {
+          const requestedScan = dependencies.webScanOptions;
+          const scanMode = requestedScan?.scanMode ?? 'NORMAL';
+          const cacheStrategy = requestedScan?.cacheStrategy ??
+            payload.cacheStrategy;
+          const runKey = requestedScan?.runKey ??
+            `discovery:${payload.scheduleGroup ?? 'MANUAL'}:${startedAt}`;
+          const scan: CombinedWebDiscoveryOptions = {
+            scanMode,
+            cacheStrategy,
+            confirmRecentlyExhausted:
+              requestedScan?.confirmRecentlyExhausted ??
+              payload.confirmRecentlyExhausted,
+            runKey,
+            activeProfileIds,
+            ...(requestedScan?.deepScanIdempotencyKey
+              ? {
+                  deepScanIdempotencyKey:
+                    requestedScan.deepScanIdempotencyKey,
+                }
+              : {}),
+          };
+          if (scanMode === 'DEEP' && !sourceConfiguration.deepScan) {
+            throw new PublicJobDiscoveryValidationError(
+              'Deep Web Scan is disabled.',
+            );
+          }
+          sourceSummaries.tavily = await runSourceDiscovery(
+            new CombinedWebDiscoveryAdapter({
+              tavilyEnabled: sourceConfiguration.tavily,
+              geminiSearchEnabled: sourceConfiguration.geminiSearch,
+              tavilyExtractEnabled: sourceConfiguration.tavilyExtract,
+              tavilyApiKey:
+                dependencies.tavilyApiKey ?? process.env.TAVILY_API_KEY ?? '',
+              geminiApiKey:
+                dependencies.geminiApiKey ?? process.env.GEMINI_API_KEY ?? '',
+              geminiSearchModel:
+                dependencies.geminiSearchModel ??
+                process.env.GEMINI_SEARCH_MODEL?.trim() ?? null,
+              store: webStore,
+              caps: resolveWebDiscoveryQuotaCaps(
+                dependencies.sourceEnvironment,
+              ),
+              philippineDate: philippineCalendarDate(now()),
+              scan,
+              fetchImpl,
+              timeoutMs,
+              now,
+              resolveHost: dependencies.resolveHost,
+              geminiClientFactory: dependencies.geminiSearchClientFactory,
+              onStage: dependencies.onWebDiscoveryStage,
+            }),
+            {
+              ...sharedOptions,
+              limit: scanMode === 'DEEP' ? 1000 : 250,
+            },
+            repository,
+            verifiedSkills,
+            deduplicationContext,
+            dependencies.diagnosticCollector,
+            dependencies.onProcessingStage,
+          );
+        } catch (error) {
+          if (error instanceof PublicJobDiscoveryValidationError) throw error;
+          sources.tavily = emptySourceResult('FAILED', mapSourceError(error));
+        } finally {
+          ownedStore?.close?.();
+        }
+      }
+    }
+
+    if (sourceConfiguration.arbeitnow) {
       dependencies.onSourceStart?.('arbeitnow');
       try {
         sourceSummaries.arbeitnow = await runSourceDiscovery(
@@ -832,13 +1074,15 @@ async function evaluatePublicJobDiscovery(
           repository,
           verifiedSkills,
           deduplicationContext,
+          dependencies.diagnosticCollector,
+          dependencies.onProcessingStage,
         );
       } catch (error) {
         sources.arbeitnow = emptySourceResult('FAILED', mapSourceError(error));
       }
     }
 
-    if (payload.remotiveEnabled) {
+    if (sourceConfiguration.remotive) {
       dependencies.onSourceStart?.('remotive');
       try {
         sourceSummaries.remotive = await runSourceDiscovery(
@@ -862,13 +1106,15 @@ async function evaluatePublicJobDiscovery(
           repository,
           verifiedSkills,
           deduplicationContext,
+          dependencies.diagnosticCollector,
+          dependencies.onProcessingStage,
         );
       } catch (error) {
         sources.remotive = emptySourceResult('FAILED', mapSourceError(error));
       }
     }
 
-    if (payload.leverEnabled) {
+    if (sourceConfiguration.lever) {
       dependencies.onSourceStart?.('lever');
       try {
         const companies = resolveLeverCompanySelection(payload);
@@ -890,6 +1136,8 @@ async function evaluatePublicJobDiscovery(
           repository,
           verifiedSkills,
           deduplicationContext,
+          dependencies.diagnosticCollector,
+          dependencies.onProcessingStage,
         );
       } catch (error) {
         if (error instanceof PublicJobDiscoveryValidationError) {
@@ -899,11 +1147,7 @@ async function evaluatePublicJobDiscovery(
       }
     }
 
-    for (const sourceName of [
-      'arbeitnow',
-      'remotive',
-      'lever',
-    ] as const) {
+    for (const sourceName of PUBLIC_JOB_DISCOVERY_SOURCE_IDS) {
       const summary = sourceSummaries[sourceName];
       if (summary) {
         sources[sourceName] = mapSummaryToSourceResult(
@@ -921,6 +1165,9 @@ async function evaluatePublicJobDiscovery(
     return {
       result: {
       mode: 'DRY_RUN',
+      finalStatus: anySourceEnabled
+        ? 'COMPLETED'
+        : 'NO_DISCOVERY_SOURCES_ENABLED',
       startedAt,
       completedAt,
       query: payload.query,
@@ -949,6 +1196,9 @@ export async function runPublicJobDiscoveryDryRun(
   dependencies: PublicJobDiscoveryDryRunDependencies = {},
 ): Promise<PublicJobDiscoveryDryRunResult> {
   const payload = parsePayload(unvalidatedPayload);
+  const noSourcesEnabled = !hasEnabledDiscoverySource(
+    effectiveSourceConfiguration(payload, dependencies),
+  );
   const databasePath =
     dependencies.databasePath ?? defaultDatabasePath();
   const dryRunSession = dependencies.repository
@@ -956,7 +1206,17 @@ export async function runPublicJobDiscoveryDryRun(
         repository: dependencies.repository,
         cleanup() {},
       }
-    : createDryRunRepositorySession(databasePath);
+    : noSourcesEnabled
+      ? {
+          repository: {
+            async loadExistingJobs() { return []; },
+            async persistBatch() {
+              throw new Error('No-source dry runs cannot persist.');
+            },
+          },
+          cleanup() {},
+        }
+      : createDryRunRepositorySession(databasePath);
   try {
     return (
       await evaluatePublicJobDiscovery(
@@ -981,14 +1241,10 @@ function collectControlledSourceFailures(
   sources: ControlledPublicJobDiscoveryResult['sources'],
 ): ControlledSourceFailure[] {
   const failures: ControlledSourceFailure[] = [];
-  for (const sourceName of [
-    'arbeitnow',
-    'remotive',
-    'lever',
-  ] as const) {
+  for (const sourceName of PUBLIC_JOB_DISCOVERY_SOURCE_IDS) {
     const source = sources[sourceName];
     if (!source) continue;
-    if (source.error) {
+    if (source.error && !source.tavily) {
       failures.push({
         source: sourceName,
         code: controlledSourceFailureCode(source.error.code),
@@ -1001,6 +1257,38 @@ function collectControlledSourceFailures(
         code: controlledSourceFailureCode(failure.errorCode),
       });
     }
+    const tavilyFailures = source.web
+      ? source.web.tavilySearch.sourceFailures
+      : source.tavily?.sourceFailures ?? [];
+    for (const failure of tavilyFailures) {
+      failures.push({
+        source: sourceName,
+        provider: 'TAVILY_SEARCH',
+        code: controlledSourceFailureCode(failure.code),
+        ...(failure.queryId ? { queryId: failure.queryId } : {}),
+      });
+    }
+    for (const failure of source.web?.geminiSearch.sourceFailures ?? []) {
+      failures.push({
+        source: sourceName,
+        provider: 'GEMINI_SEARCH',
+        code: controlledSourceFailureCode(failure.code),
+        queryId: failure.promptId,
+        providerCategory: failure.providerCategory,
+        providerStatus: failure.providerStatus,
+        requestReachedProvider: failure.requestReachedProvider,
+        quotaReserved: failure.quotaReserved,
+        quotaReleased: failure.quotaReleased,
+        groundedUrlsReturned: failure.groundedUrlsReturned,
+      });
+    }
+    for (const failure of source.web?.tavilyExtract.sourceFailures ?? []) {
+      failures.push({
+        source: sourceName,
+        provider: 'TAVILY_EXTRACT',
+        code: controlledSourceFailureCode(failure.code),
+      });
+    }
   }
   return failures;
 }
@@ -1009,6 +1297,8 @@ function sourceNameKey(
   sourceName: string,
 ): PublicJobDiscoverySourceName | null {
   const normalized = sourceName.trim().toLowerCase();
+  if (normalized.includes('tavily')) return 'tavily';
+  if (normalized.includes('gemini search')) return 'tavily';
   if (normalized.includes('arbeitnow')) return 'arbeitnow';
   if (normalized.includes('remotive')) return 'remotive';
   if (normalized.includes('lever')) return 'lever';
@@ -1019,11 +1309,7 @@ function sanitizeControlledSources(
   sources: PublicJobDiscoveryDryRunResult['sources'],
 ): ControlledPublicJobDiscoveryResult['sources'] {
   const sanitized: ControlledPublicJobDiscoveryResult['sources'] = {};
-  for (const sourceName of [
-    'arbeitnow',
-    'remotive',
-    'lever',
-  ] as const) {
+  for (const sourceName of PUBLIC_JOB_DISCOVERY_SOURCE_IDS) {
     const source = sources[sourceName];
     if (source) {
       const { error: _internalError, ...safeSource } = source;
@@ -1093,7 +1379,7 @@ function emptyControlledProfileSummaries(
 }
 
 interface AuthorizedPersistenceRun {
-  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING';
+  runKind: 'MANUAL_CONTROLLED' | 'SCHEDULED_MORNING' | 'DASHBOARD_SCAN';
   taskId: string;
   philippineDate: string;
 }
@@ -1117,7 +1403,10 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
   });
   const activeProfileIds = [...(discoveryPayload.profileIds ?? [])];
   const earlyResult = (
-    finalStatus: 'ALREADY_COMPLETED' | 'DAILY_CAP_REACHED',
+    finalStatus:
+      | 'ALREADY_COMPLETED'
+      | 'DAILY_CAP_REACHED'
+      | 'NO_DISCOVERY_SOURCES_ENABLED',
   ): ControlledPublicJobDiscoveryResult => ({
     mode: 'CONTROLLED',
     environment: 'DEVELOPMENT',
@@ -1140,7 +1429,16 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
     },
     persistenceLimit: payload.maxJobsToPersist,
     idempotencyStatus: dailyState.idempotencyStatus,
-    sources: {},
+    sources: Object.fromEntries(
+      PUBLIC_JOB_DISCOVERY_SOURCE_IDS.map((source) => [
+        source,
+        emptySourceResult(
+          effectiveSourceConfiguration(discoveryPayload, dependencies)[source]
+            ? 'ENABLED'
+            : 'DISABLED',
+        ),
+      ]),
+    ) as ControlledPublicJobDiscoveryResult['sources'],
     profileSummaries: emptyControlledProfileSummaries(activeProfileIds),
     combinedTotals: emptyControlledCombinedTotals(),
     qualifiedBeforeCap: 0,
@@ -1158,6 +1456,13 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
     persistedJobs: [],
     persistenceEnabled: true,
   });
+  if (
+    !hasEnabledDiscoverySource(
+      effectiveSourceConfiguration(discoveryPayload, dependencies),
+    )
+  ) {
+    return earlyResult('NO_DISCOVERY_SOURCES_ENABLED');
+  }
   if (dailyState.idempotencyStatus === 'ALREADY_COMPLETED') {
     return earlyResult('ALREADY_COMPLETED');
   }
@@ -1189,7 +1494,12 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
   }
 
   const stoppedResult = (
-    finalStatus: 'SOURCE_FAILED' | 'EXTRACTION_FAILED',
+    finalStatus:
+      | 'SOURCE_FAILED'
+      | 'EXTRACTION_FAILED'
+      | 'QUERY_GROUPS_RECENTLY_EXHAUSTED'
+      | 'CANCELLED'
+      | 'NO_DISCOVERY_SOURCES_ENABLED',
     extractionSucceeded: number,
     extractionFailed: number,
   ): ControlledPublicJobDiscoveryResult => ({
@@ -1238,7 +1548,27 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
     persistedJobs: [],
     persistenceEnabled: true,
   });
-  if (sourceFailures.length > 0) {
+  if (evaluation.result.finalStatus === 'NO_DISCOVERY_SOURCES_ENABLED') {
+    return stoppedResult('NO_DISCOVERY_SOURCES_ENABLED', 0, 0);
+  }
+  const webStoppingReason =
+    evaluation.result.sources.tavily?.web?.stoppingReason;
+  if (webStoppingReason === 'QUERY_GROUPS_RECENTLY_EXHAUSTED') {
+    return stoppedResult('QUERY_GROUPS_RECENTLY_EXHAUSTED', 0, 0);
+  }
+  if (webStoppingReason === 'CANCELLED') {
+    return stoppedResult('CANCELLED', 0, 0);
+  }
+  const enabledSourceResults = Object.values(evaluation.result.sources).filter(
+    (source): source is PublicJobDiscoverySourceResult =>
+      source !== undefined && source.status !== 'DISABLED',
+  );
+  const everyEnabledSourceUnavailable =
+    enabledSourceResults.length > 0 &&
+    enabledSourceResults.every((source) =>
+      ['FAILED', 'DAILY_LIMIT_REACHED', 'MONTHLY_LIMIT_REACHED'].includes(source.status),
+    );
+  if (sourceFailures.length > 0 && everyEnabledSourceUnavailable) {
     return stoppedResult('SOURCE_FAILED', 0, 0);
   }
 
@@ -1249,11 +1579,13 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
   let extractionFailed = 0;
   for (const record of selected) {
     try {
+      dependencies.onRequirementsExtractionStart?.();
       enrichedSelected.push(
         await enrichControlledPersistenceCandidate(
           record,
           verifiedSkills,
           dependencies.requirementsExtractor,
+          { onUsage: dependencies.onGeminiUsage },
         ),
       );
     } catch {
@@ -1268,6 +1600,7 @@ async function runAuthorizedPublicJobDiscoveryPersistence(
     );
   }
 
+  dependencies.onPersistenceStart?.();
   const writeResult = await repository.persistControlledBatch(enrichedSelected, {
     idempotencyKey: payload.idempotencyKey,
     maxJobsToPersist: persistenceLimit,
@@ -1380,6 +1713,58 @@ export async function runControlledPublicJobDiscovery(
     {
       runKind: 'MANUAL_CONTROLLED',
       taskId: CONTROLLED_PUBLIC_JOB_DISCOVERY_TASK_ID,
+      philippineDate,
+    },
+  );
+}
+
+export async function runDashboardPublicJobDiscoveryPersistence(
+  unvalidatedPayload: unknown,
+  dependencies: ControlledPublicJobDiscoveryDependencies,
+): Promise<ControlledPublicJobDiscoveryResult> {
+  const parsed = DashboardJobScanPayloadSchema.safeParse(unvalidatedPayload);
+  if (
+    !parsed.success ||
+    (parsed.data.mode !== 'SAVE' &&
+      !(parsed.data.mode === 'DEEP' && parsed.data.verifyAndSave))
+  ) {
+    throw new ControlledPersistenceGateError(
+      'INVALID_PAYLOAD',
+      'Dashboard persistence payload is invalid.',
+    );
+  }
+  if (dependencies.taskId !== DASHBOARD_PUBLIC_JOB_SCAN_TASK_ID) {
+    throw new ControlledPersistenceGateError(
+      'WRONG_TASK',
+      'Dashboard persistence is available only from its dedicated task.',
+    );
+  }
+  if (dependencies.environmentType !== 'DEVELOPMENT') {
+    throw new ControlledPersistenceGateError(
+      'NON_DEVELOPMENT_ENVIRONMENT',
+      'Dashboard persistence is restricted to DEVELOPMENT.',
+    );
+  }
+  if (!dependencies.killSwitchEnabled) {
+    throw new ControlledPersistenceGateError(
+      'KILL_SWITCH_DISABLED',
+      'Dashboard persistence is disabled.',
+    );
+  }
+  const philippineDate = philippineCalendarDate(
+    (dependencies.now ?? (() => new Date()))(),
+  );
+  return runAuthorizedPublicJobDiscoveryPersistence(
+    {
+      scheduleGroup: 'MORNING',
+      persistenceMode: 'CONTROLLED',
+      maxJobsToPersist: PUBLIC_JOB_DISCOVERY_DAILY_LIMIT,
+      idempotencyKey: parsed.data.idempotencyKey,
+    },
+    dependencies,
+    {
+      runKind: 'DASHBOARD_SCAN',
+      taskId: DASHBOARD_PUBLIC_JOB_SCAN_TASK_ID,
       philippineDate,
     },
   );

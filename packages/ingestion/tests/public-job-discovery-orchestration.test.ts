@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { SkillEntry } from '@job-app/core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   ArbeitnowAdapter,
 } from '../src/adapters/arbeitnow.js';
@@ -38,6 +38,25 @@ const VERIFIED_SKILLS: SkillEntry[] = [
     allowed_in_resume: true,
   },
 ];
+
+const LEGACY_SOURCE_SWITCHES = [
+  'JOB_DISCOVERY_ARBEITNOW_ENABLED',
+  'JOB_DISCOVERY_REMOTIVE_ENABLED',
+  'JOB_DISCOVERY_LEVER_ENABLED',
+] as const;
+const originalSourceSwitches = new Map(
+  LEGACY_SOURCE_SWITCHES.map((name) => [name, process.env[name]]),
+);
+beforeAll(() => {
+  for (const name of LEGACY_SOURCE_SWITCHES) process.env[name] = 'true';
+});
+afterAll(() => {
+  for (const name of LEGACY_SOURCE_SWITCHES) {
+    const original = originalSourceSwitches.get(name);
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
+  }
+});
 
 function discovered(
   sourceName: string,
@@ -309,8 +328,8 @@ describe('public job discovery orchestration', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('remotive.com');
-    expect(result.sources.arbeitnow).toBeUndefined();
-    expect(result.sources.lever).toBeUndefined();
+    expect(result.sources.arbeitnow?.status).toBe('DISABLED');
+    expect(result.sources.lever?.status).toBe('DISABLED');
     expect(result.sources.remotive?.status).toBe('SUCCESS');
   });
 
@@ -602,7 +621,7 @@ describe('public job discovery orchestration', () => {
     );
   });
 
-  it('does not depend on Gemini in orchestration or trigger task sources', () => {
+  it('keeps Gemini SDK and all client-exposed credentials out of orchestration and trigger sources', () => {
     const files = [
       '../src/discovery/orchestration.ts',
       '../src/discovery/runtime.ts',
@@ -614,7 +633,7 @@ describe('public job discovery orchestration', () => {
       )
       .join('\n');
     expect(source).not.toMatch(
-      /@google\/genai|extractJobWithGemini|GEMINI_API_KEY/,
+      /@google\/genai|extractJobWithGemini|NEXT_PUBLIC_(?:GEMINI|TAVILY|TRIGGER)/,
     );
   });
 

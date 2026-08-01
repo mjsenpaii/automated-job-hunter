@@ -17,11 +17,17 @@ import {
 import {
   getEnabledJobSearchProfileIds,
   hasVibeCodingMatchEvidence,
+  diagnoseJobSearchProfileCoverage,
   matchProfilesForDiscoveredJobWithEvidence,
   type JobSearchProfileId,
 } from './job-search-profiles.v1.js';
-import { matchesDiscoveryFilters } from './filters.js';
+import { evaluateDiscoveryFilters } from './filters.js';
 import { mapDiscoveredJobToRawInput } from './mapper.js';
+import type {
+  DiscoveryDiagnosticEvent,
+  DiscoveryDiagnosticReasonCode,
+  ProfileCoverageDecision,
+} from './profile-coverage-diagnostics.js';
 
 function previewStatus(
   result: IngestionResult,
@@ -43,6 +49,7 @@ interface DiscoveryRunAccounting {
   untargeted: number;
   vibeCodingRolesFound: number;
   duplicates: number;
+  profileMatchedDuplicates: number;
   hardRejectedJobs: number;
   eligibleScoredJobs: number;
   pipelineErrors: number;
@@ -74,6 +81,46 @@ interface DiscoveryIdentityEntry {
 
 interface DiscoveryIdentityState {
   entriesByNormalizedId: Map<string, DiscoveryIdentityEntry>;
+}
+
+function pipelineDiagnosticReasons(
+  result: IngestionResult,
+): DiscoveryDiagnosticReasonCode[] {
+  if (result.status === 'DUPLICATE') return ['DUPLICATE'];
+  if (result.status === 'ERROR') return ['OTHER_EXISTING_REASON'];
+  if (result.status !== 'HARD_REJECTED') return [];
+  const mapped = (result.rejection_reasons ?? []).map(
+    (reason): DiscoveryDiagnosticReasonCode => {
+      if (reason === 'SENIORITY_MISMATCH') {
+        return 'EXCESSIVE_EXPERIENCE_OR_SENIORITY';
+      }
+      if (
+        reason === 'COUNTRY_INELIGIBLE' ||
+        reason === 'INTERNATIONAL_NON_REMOTE'
+      ) {
+        return 'EXCLUDED_LOCATION';
+      }
+      return 'OTHER_EXISTING_REASON';
+    },
+  );
+  return [...new Set(mapped)];
+}
+
+function emitDiagnostic(
+  dependencies: DiscoveryRunDependencies,
+  discovered: DiscoveredJob,
+  event: Omit<
+    DiscoveryDiagnosticEvent,
+    'sourceName' | 'sourceJobId' | 'title' | 'company'
+  >,
+): void {
+  dependencies.diagnosticCollector?.record({
+    sourceName: discovered.sourceName,
+    sourceJobId: discovered.sourceJobId,
+    title: discovered.title,
+    company: discovered.company,
+    ...event,
+  });
 }
 
 const identityStates = new WeakMap<
@@ -298,6 +345,8 @@ export function materializeDiscoveryRunSummary(
     vibeCodingRolesFound:
       metadata.owner.accounting.vibeCodingRolesFound,
     duplicates: metadata.owner.accounting.duplicates,
+    profileMatchedDuplicates:
+      metadata.owner.accounting.profileMatchedDuplicates,
     hardRejectedJobs: metadata.owner.accounting.hardRejectedJobs,
     eligibleScoredJobs: metadata.owner.accounting.eligibleScoredJobs,
     pipelineErrors: metadata.owner.accounting.pipelineErrors,
@@ -434,6 +483,7 @@ export async function runDiscovery(
   // Fetch and source validation complete before the repository is asked to
   // persist anything. A fetch failure therefore cannot partially write.
   const fetched = await dependencies.adapter.fetchJobs(options);
+  dependencies.onProcessingStage?.('REMOVING_DUPLICATES');
   const deduplicationContext =
     dependencies.deduplicationContext ?? {
       knownJobs: [...(await dependencies.repository.loadExistingJobs())],
@@ -460,6 +510,7 @@ export async function runDiscovery(
     untargeted: 0,
     vibeCodingRolesFound: 0,
     duplicates: 0,
+    profileMatchedDuplicates: 0,
     hardRejectedJobs: 0,
     eligibleScoredJobs: 0,
     pipelineErrors: 0,
@@ -473,6 +524,13 @@ export async function runDiscovery(
       identityNormalized = normalizeJob(raw);
     } catch {
       accounting.pipelineErrors += 1;
+      emitDiagnostic(dependencies, discovered, {
+        normalizedId: null,
+        stage: 'NORMALIZATION',
+        reasonCodes: ['OTHER_EXISTING_REASON'],
+        passedLocalFilters: null,
+        profileDecisions: [],
+      });
       continue;
     }
     const identityDuplicate = checkDuplicate(
@@ -484,7 +542,11 @@ export async function runDiscovery(
           identityDuplicate.duplicate_of_id,
         )
       : undefined;
-    const passedLocalFilters = matchesDiscoveryFilters(discovered, options);
+    dependencies.onProcessingStage?.('APPLYING_FILTERS');
+    const filterEvaluation = evaluateDiscoveryFilters(discovered, options);
+    const passedLocalFilters = filterEvaluation.matches;
+    const profileDecisions: ProfileCoverageDecision[] =
+      diagnoseJobSearchProfileCoverage(discovered, activeProfileIds);
     const variant: DiscoveryIdentityVariant = {
       sourceName: discovered.sourceName,
       sourceJobId: discovered.sourceJobId,
@@ -501,6 +563,16 @@ export async function runDiscovery(
     if (duplicateEntry) duplicateEntry.variants.push(variant);
 
     if (!passedLocalFilters) {
+      emitDiagnostic(dependencies, discovered, {
+        normalizedId: variant.normalizedId,
+        stage: 'LOCAL_FILTER',
+        reasonCodes: [
+          ...filterEvaluation.reasons,
+          ...(identityDuplicate.is_duplicate ? ['DUPLICATE' as const] : []),
+        ],
+        passedLocalFilters: false,
+        profileDecisions,
+      });
       accounting.excludedByFilters += 1;
       if (identityDuplicate.is_duplicate) {
         accounting.duplicates += 1;
@@ -525,6 +597,7 @@ export async function runDiscovery(
       continue;
     }
 
+    dependencies.onProcessingStage?.('MATCHING_PROFILES');
     const matchedProfileEvidence = matchProfilesForDiscoveredJobWithEvidence(
       discovered,
       activeProfileIds,
@@ -535,6 +608,16 @@ export async function runDiscovery(
     variant.matchedProfileIds = [...matchedProfileIds];
 
     if (matchedProfileIds.length === 0) {
+      emitDiagnostic(dependencies, discovered, {
+        normalizedId: variant.normalizedId,
+        stage: 'PROFILE_MATCHING',
+        reasonCodes: [
+          'UNTARGETED',
+          ...(identityDuplicate.is_duplicate ? ['DUPLICATE' as const] : []),
+        ],
+        passedLocalFilters: true,
+        profileDecisions,
+      });
       if (
         identityDuplicate.is_duplicate &&
         duplicateEntry?.state === 'FILTERED'
@@ -619,6 +702,13 @@ export async function runDiscovery(
       dependencies.verifiedSkills,
     );
     const persistedStatus = persistenceStatus(result);
+    emitDiagnostic(dependencies, discovered, {
+      normalizedId: variant.normalizedId,
+      stage: 'PIPELINE',
+      reasonCodes: pipelineDiagnosticReasons(result),
+      passedLocalFilters: true,
+      profileDecisions,
+    });
     const promotionSucceeded =
       promotingEarlierVariant &&
       persistedStatus !== null &&
@@ -628,6 +718,7 @@ export async function runDiscovery(
       reclassifyOwnerAsDuplicate(duplicateEntry);
     } else if (result.status === 'DUPLICATE') {
       accounting.duplicates += 1;
+      accounting.profileMatchedDuplicates += 1;
     }
     if (result.status === 'HARD_REJECTED') {
       accounting.hardRejectedJobs += 1;
@@ -792,6 +883,7 @@ export async function runDiscovery(
     untargeted: accounting.untargeted,
     vibeCodingRolesFound: accounting.vibeCodingRolesFound,
     duplicates: accounting.duplicates,
+    profileMatchedDuplicates: accounting.profileMatchedDuplicates,
     hardRejectedJobs: accounting.hardRejectedJobs,
     eligibleScoredJobs: accounting.eligibleScoredJobs,
     pipelineErrors: accounting.pipelineErrors,
@@ -804,6 +896,12 @@ export async function runDiscovery(
       .filter((value): value is DiscoveryProfileStats => value !== undefined),
     ...(fetched.companyFetchReport
       ? { companyFetchReport: fetched.companyFetchReport }
+      : {}),
+    ...(fetched.tavilyFetchReport
+      ? { tavilyFetchReport: fetched.tavilyFetchReport }
+      : {}),
+    ...(fetched.webDiscoveryReport
+      ? { webDiscoveryReport: fetched.webDiscoveryReport }
       : {}),
   };
   summaryOwners.set(summary, { owner: currentOwner, state: identityState });

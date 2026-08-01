@@ -42,6 +42,14 @@ export function defaultDatabasePath(
   return path.join(root, 'data', 'app.db');
 }
 
+export function resolveWebDiscoveryDatabasePath(options: {
+  databasePath?: string;
+  repositoryInjected: boolean;
+}): string {
+  return options.databasePath ??
+    (options.repositoryInjected ? ':memory:' : defaultDatabasePath());
+}
+
 export function defaultSkillsPath(
   root: string = resolveDiscoveryRepositoryRoot(),
 ): string {

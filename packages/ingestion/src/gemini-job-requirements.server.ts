@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   createGeminiGenerateContent,
+  type GeminiGenerateContentUsageMetadata,
   resolveGeminiModelConfiguration,
   type GeminiGenerateContent,
 } from './gemini-job-extractor.server.js';
@@ -326,6 +327,29 @@ export interface ExtractVerifiedJobRequirementsOptions {
   modelIdentifier?: string;
   now?: () => Date;
   timeoutMs?: number;
+  onUsage?: (usage: GeminiRequirementsTokenUsage) => void;
+}
+
+export interface GeminiRequirementsTokenUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
+function safeTokenCount(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+export function normalizeGeminiRequirementsUsage(
+  metadata: GeminiGenerateContentUsageMetadata | undefined,
+): GeminiRequirementsTokenUsage {
+  return {
+    inputTokens: safeTokenCount(metadata?.promptTokenCount),
+    outputTokens: safeTokenCount(metadata?.candidatesTokenCount),
+    totalTokens: safeTokenCount(metadata?.totalTokenCount),
+  };
 }
 
 export function resolveGeminiRequirementsModelIdentifier(): string {
@@ -519,7 +543,7 @@ async function generateWithTimeout(
   generate: GeminiGenerateContent,
   request: Parameters<GeminiGenerateContent>[0],
   timeoutMs: number,
-): Promise<{ readonly text?: string }> {
+): ReturnType<GeminiGenerateContent> {
   let handle: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -542,7 +566,10 @@ export async function extractVerifiedJobRequirements(
   const candidates = enumerateJobRequirementCandidates(prepared, input.providerMetadata);
   const contentHash = computeJobRequirementsContentHash(input, modelIdentifier);
   const generate = options.generateContent ?? createGeminiGenerateContent();
-  let response: { readonly text?: string };
+  let response: {
+    readonly text?: string;
+    readonly usageMetadata?: GeminiGenerateContentUsageMetadata;
+  };
   try {
     response = await generateWithTimeout(
       generate,
@@ -562,6 +589,9 @@ export async function extractVerifiedJobRequirements(
     if (error instanceof GeminiJobRequirementsError) throw error;
     throw new GeminiJobRequirementsError(providerFailureCode(error));
   }
+  options.onUsage?.(
+    normalizeGeminiRequirementsUsage(response.usageMetadata),
+  );
   if (!response.text) {
     throw new GeminiJobRequirementsError(
       'MODEL_OUTPUT_INVALID',

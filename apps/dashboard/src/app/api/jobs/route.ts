@@ -5,7 +5,7 @@ import { desc, eq } from 'drizzle-orm';
 import {
   validateConfirmScoreRequest,
   apiError,
-} from '@job-app/ingestion';
+} from '@job-app/ingestion/dashboard-server';
 import { processAndPersistImportedJob } from '@/lib/jobs/process-import';
 
 export async function GET() {

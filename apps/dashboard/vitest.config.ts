@@ -31,6 +31,14 @@ export default defineConfig({
         __dirname,
         '../../packages/ingestion/src/job-requirements-contracts.ts',
       ),
+      '@job-app/ingestion/discovery/dashboard-scan-contracts': path.resolve(
+        __dirname,
+        '../../packages/ingestion/src/discovery/dashboard-scan-contracts.ts',
+      ),
+      '@job-app/ingestion/discovery/dashboard-scan': path.resolve(
+        __dirname,
+        '../../packages/ingestion/src/discovery/dashboard-scan.ts',
+      ),
       '@job-app/ingestion/government-enrichment': path.resolve(
         __dirname,
         '../../packages/ingestion/src/government-enrichment.ts',

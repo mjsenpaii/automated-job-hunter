@@ -1,9 +1,15 @@
 import type { DiscoveredJob } from './contracts.js';
+import type { DiscoveryDiagnosticReasonCode } from './profile-coverage-diagnostics.js';
 
 export interface DiscoveryFilters {
   remoteOnly: boolean;
   query: string;
   category?: string;
+}
+
+export interface DiscoveryFilterEvaluation {
+  matches: boolean;
+  reasons: DiscoveryDiagnosticReasonCode[];
 }
 
 function normalizedCategory(value: string): string {
@@ -20,18 +26,28 @@ export function matchesDiscoveryFilters(
   job: DiscoveredJob,
   filters: DiscoveryFilters,
 ): boolean {
-  if (filters.remoteOnly && job.remote !== true) return false;
+  return evaluateDiscoveryFilters(job, filters).matches;
+}
+
+export function evaluateDiscoveryFilters(
+  job: DiscoveredJob,
+  filters: DiscoveryFilters,
+): DiscoveryFilterEvaluation {
+  const reasons: DiscoveryDiagnosticReasonCode[] = [];
+  if (filters.remoteOnly && job.remote !== true) {
+    reasons.push('EXCLUDED_LOCATION');
+  }
 
   const category = normalizedCategory(filters.category ?? '');
   if (
     category &&
     normalizedCategory(job.category ?? '') !== category
   ) {
-    return false;
+    reasons.push('UNRELATED_ROLE_FAMILY');
   }
 
   const query = filters.query.trim().toLocaleLowerCase();
-  if (!query) return true;
+  if (!query) return { matches: reasons.length === 0, reasons };
 
   const searchable = [
     job.title,
@@ -46,5 +62,8 @@ export function matchesDiscoveryFilters(
   ]
     .join(' ')
     .toLocaleLowerCase();
-  return searchable.includes(query);
+  if (!searchable.includes(query)) {
+    reasons.push('INSUFFICIENT_POSITIVE_EVIDENCE');
+  }
+  return { matches: reasons.length === 0, reasons };
 }

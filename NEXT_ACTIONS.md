@@ -1,7 +1,191 @@
 # Next Actions
 
-**Last updated:** 2026-08-01 PHT
-**Current state:** Phase 7.1B.5A is implemented and live-validated on top of completed Phase 7.1B.4A-B. DEVELOPMENT run `run_06frj6g5id1v7jt47pv73m7e01` fetched 134 jobs but found zero fixed-profile matches, so zero jobs and zero Gemini calls were valid safe outcomes. The completed PHT-date idempotency key blocks the later same-day 8:00 AM run. Jobs remain 14, scores 6, applications 0, extractions 14, and activity is now 3. Evening stays DRY_RUN-only and production persistence stays disabled.
+**Last updated:** 2026-08-02 PHT
+**Current state:** Phase 7.1B.5B–7.1B.7A has passed final release verification: 632/632 tests, workspace and dashboard production builds, dashboard/ingestion strict TypeScript, diff validation, and browser-bundle credential scanning. Local worker features are configured through ignored environment files; production-mutating discovery remains deliberately disabled behind the existing environment and exact-switch gates.
+
+---
+
+## After this release
+
+1. Deploy the dashboard and Trigger.dev worker as separate server processes;
+   keep provider/model credentials only on the worker and the Trigger server
+   credential only on the dashboard server. Never expose either through
+   `NEXT_PUBLIC_*` variables.
+2. Treat production persistence enablement as a separate rollout. The current
+   release is production-build ready, but scheduled persistence, dashboard
+   scans, Deep Scan, and freelance scanning remain DEVELOPMENT-only where
+   specified. Do not weaken those gates without a copied-database validation,
+   rollback plan, quota reconciliation, and explicit approval.
+3. Run at most one separately authorized smoke scan after deployment. Start
+   with cached Preview, verify safe source diagnostics and zero automatic
+   persistence, then authorize fresh provider use only when quotas and network
+   reachability have been reviewed.
+4. Keep Gemini Search optional until its previously observed fail-closed
+   `NETWORK_FAILURE` is resolved in the deployment network. Tavily and other
+   explicitly enabled sources must continue independently.
+5. Review Preview opportunities manually before saving. Saving for review is
+   local only and must never become an automatic proposal, bid, message,
+   application, or submission.
+
+---
+
+## Validate freelance discovery before enabling it locally
+
+Preserve the first-party forum boundary: only replies whose stable forum
+author identity matches the original post may clarify geography, timezone,
+closure/filled state, experience, pay, or scope. Applicant comments remain
+excluded from listing evidence. The cached n8n Community case is `NOT READY /
+GEOGRAPHIC_RESTRICTION` because the original poster explicitly excludes the
+Philippines. Treat `POTENTIALLY_STALE_LISTING` as a manual freshness warning,
+not an accusation or an automatic positive signal.
+
+1. Validate the new temporary Preview review workspace during the next
+   separately authorized cached scan. Confirm one/zero/many result states,
+   readiness filtering, original links, source diagnostics, and the explicit
+   confirmation copy. Preview itself must still write zero opportunities.
+2. Treat **Save for Review** as a distinct manual action. It revalidates the
+   trusted original public URL before one local atomic write, shares the
+   separate 20-per-PHT-day freelance cap, and never contacts a client. `NOT
+   READY` requires explicit blocker acknowledgement; hard-rejected, expired,
+   invalid, and unsafe URLs remain unsaveable.
+3. Keep the installed Impeccable and `emil-design-eng` files uncommitted unless
+   a later explicit commit request includes a reviewed agent-skill policy.
+   Their current project-local paths are `.agents/skills/impeccable` and
+   `.agents/skills/emil-design-eng`.
+4. Preserve the atomic `ensureSchema` upgrade for early Phase 7.1B.7A
+   databases. Do not replace it with a destructive reset; any future freelance
+   schema additions require an additive migration and existing-database test.
+5. Keep `JOB_DISCOVERY_FREELANCE_ENABLED` and every freelance source switch
+   disabled until an explicitly authorized development validation. Do not add
+   provider variables to the Next.js dashboard environment.
+6. Preserve the new page-quality gate: search/category/article/service/profile
+   pages are `NON_OPPORTUNITY_PAGE`, search snippets are never scope evidence,
+   and an attributable individual page with incomplete evidence may be
+   `REVIEW SCOPE MANUALLY` but never positive readiness. The latest five-item
+   cached reclassification is 1 valid opportunity, 4 non-opportunity pages,
+   0 manual-scope reviews, 1 not ready, and no positive readiness.
+7. Preserve the independent exact Extract gate. A thin specific individual
+   page may enter recovery only with
+   `JOB_DISCOVERY_TAVILY_EXTRACT_ENABLED=true`; generic result/onboarding pages
+   never consume Extract credits, and disabled Extract makes no request.
+8. Treat `REVIEW SCOPE MANUALLY` as local review only. Unresolved geography may
+   qualify when no deterministic disqualifier exists, but incompatible
+   geography, mandatory experience, seniority, regulated work, or hard risk
+   remains `NOT READY`; neither state may be automatically saved.
+9. For the next separately authorized single Tavily Preview, first prefer the
+   still-valid cached query group to validate the corrected page-type and
+   metric labels without new Search credits. Keep Gemini Search disabled while
+   its network issue persists and enable Tavily Search/Extract only under the
+   existing shared ledger. The deterministic query rotation uses quoted
+   task-level phrases such as small WordPress fixes, manual QA, spreadsheet
+   cleanup, n8n setup, and Philippines-eligible short contracts.
+10. When live source validation is authorized, respect Himalayas and Remotive
+   attribution/link requirements and public API guidance. Tavily must use the
+   existing shared Search/Extract quota ledger. Gemini Search remains optional
+   and non-fatal while its fail-closed `NETWORK_FAILURE` persists.
+11. Validate rate handling: exactly USD 3.00 is below preference, greater values
+   qualify, non-USD pay remains unconverted, fixed price requires scope review,
+   and missing pay remains visible.
+12. Review `LEARNABLE FAST WITH AI` decisions manually. Every gap must be
+   adjacent to verified skills, bounded to 4–24 focused hours when defensible,
+   backed by a practice/sample template, and blocked by mandatory experience,
+   credentials, regulation, senior ownership, high-risk scope, or an explicit
+   geography that does not accept the Philippines.
+13. A learnable opportunity remains not application-ready until the user
+   completes the local `Mark Preparation Complete` record. Never convert recent
+   study into claimed prior experience.
+14. Authorize Scan & Save only after Preview acceptance and a copied database
+   baseline. Reconcile the separate 20-per-PHT-day ledger and confirm the
+   regular five-job ledger is unchanged.
+15. Keep Upwork/Freelancer integrations pending until official API credentials
+   exist. Do not scrape authenticated pages or bypass platform protections.
+16. Proposal generation, bidding, messaging, offer acceptance, contracts,
+   payments, and submission remain out of scope.
+
+---
+
+## Validate combined web discovery deliberately before broader use
+
+1. Do not rerun live discovery until the worker and dashboard have been
+   restarted on the corrected code. Gemini Search failures now retain a closed
+   provider category/status, request-reached state, reservation/release state,
+   and grounded URL count. The last Fresh Preview's two Tavily Search calls
+   succeeded; its eight `API_ERROR` entries came from Gemini Search.
+2. The authorized copied-snapshot audit of the local web operational tables is
+   complete. Eight test-owned web cache rows and one matching query-history
+   row were removed atomically; the eight associated credit-ledger entries were
+   deliberately retained because those Tavily requests consumed real credits.
+   The user's earlier eight-credit Preview Scan remains intact. Keep all future
+   repository-injected discovery tests on the enforced in-memory store path.
+3. Keep provider keys and all search/extract/model switches in the Trigger.dev
+   worker environment only. The dashboard server may trigger and poll the fixed
+   task but must never receive provider credentials.
+4. First live-validate a cached Preview Scan, then one explicitly confirmed
+   fresh Preview Scan. Cached scans may intentionally return the same listings;
+   a fully cached group must use zero fresh Tavily Search credits and zero fresh
+   Gemini Search prompts.
+5. Confirm a fresh scan selects the next deterministic group, invokes enabled
+   Tavily Basic Search and Gemini Google Search independently, and merges at
+   most 250 canonical URLs with `TAVILY`, `GEMINI_SEARCH`, or `BOTH`
+   attribution. A source failure must not activate a legacy feed.
+6. Confirm Tavily Basic Extract runs only for eligible direct-fetch failures.
+   Search and Extract share the persistent 30-credit PHT-day and 900-credit
+   PHT-month caps. Gemini Search separately shares a 60-prompt PHT-day cap.
+7. Tavily snippets and Gemini-generated search text are never evidence. A URL
+   must yield an attributable original public vacancy before matching,
+   extraction, or persistence.
+8. Validate Deep Web Scan separately only after normal scans are accepted. It
+   is development-only, explicit-confirmation-only, limited to one start per
+   rolling seven PHT days, and processes at most 1,000 canonical public URLs;
+   1,000 is a ceiling, not an expected result.
+9. Keep Deep verification/save unchecked initially. If separately authorized,
+   it may verify at most ten new matches and persist only within the existing
+   five-job daily capacity. It never creates or submits applications.
+10. Do not add Advanced Search/Extract, Crawl, Map, Research, generated Tavily
+   answers, raw-content search, or another search provider.
+
+---
+
+## Validate the dashboard scan deliberately before broader use
+
+1. Keep the worker and dashboard environments separate: root `.env.local`
+   supplies Gemini/Tavily plus their worker-only switches to `trigger:dev`,
+   while `apps/dashboard/.env.local` supplies only `TRIGGER_SECRET_KEY` and the
+   dashboard scan switch to Next.js. Never place any of them in client variables.
+2. First live-validate `Preview Scan` and confirm zero Gemini calls, zero writes,
+   and zero budget consumption. Respect Remotive's documented daily request
+   guidance when choosing the validation day.
+3. Validate `Scan & Save` only with a fresh copied-database baseline and explicit
+   authorization. Confirm it shares the scheduled/manual daily ledger and
+   cannot exceed the remaining PHT-day capacity.
+4. Confirm progress/result polling reports only closed stages and safe failure
+   codes. Actual token metadata may be unavailable; it must never be estimated.
+5. Keep one dashboard scan active at a time. Preserve task-level idempotency,
+   the concurrency-one discovery queue, and SQLite transaction/daily-cap gates.
+6. Do not enable production or evening persistence. Do not create applications,
+   submissions, resumes, cover letters, email, messages, or browser automation.
+
+---
+
+## Review the bounded coverage findings before changing matching
+
+1. Preserve the precision-first rule: only exact technical titles or bounded,
+   applicant-attributed responsibilities may provide primary evidence.
+2. Add no broad `engineer`, technology-only, tag-only, or category-only match.
+   The audit found 30 software candidates and 13 automation candidates with
+   supporting signals, but supporting signals are intentionally insufficient.
+3. If matcher coverage is changed next, start with a single reviewed
+   `Android Engineer` title fixture. Verify seniority/hard rejection still runs
+   after matching, and add adversarial tests before changing the allowlist.
+4. Review the Remotive one-request retrieval/local-category behavior
+   separately: 24 records were excluded because their returned category did
+   not equal `software-dev`. Do not remove category filtering without a source
+   compliance and recall/precision review.
+5. Do not change AI Automation matching merely to force a persisted result.
+   The audited pool had zero applicant-role primary evidence; Lemon.io AI/LLM
+   terms and other provider metadata were only supporting context.
+6. Keep the profile coverage audit dry-run-only. It must continue to make zero
+   Gemini calls and expose no descriptions, provider payloads, or secrets.
 
 ---
 

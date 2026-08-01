@@ -23,6 +23,10 @@ const controlledTaskFile = path.resolve(
   __dirname,
   "../../../src/trigger/public-job-discovery-controlled-persistence.ts",
 );
+const dashboardTaskFile = path.resolve(
+  __dirname,
+  "../../../src/trigger/public-job-discovery-dashboard-scan.ts",
+);
 
 function source(filePath: string): string {
   return fs.readFileSync(filePath, "utf8");
@@ -54,6 +58,8 @@ describe("Trigger.dev discovery schedules", () => {
       remotiveLimit: 50,
       leverLimit: 50,
       leverCompanies: ["spotify", "highspot", "aleph"],
+      cacheStrategy: "FRESH",
+      confirmRecentlyExhausted: false,
       scheduleGroup: "MORNING",
       profileIds: ["software_development", "ai_automation"],
     });
@@ -71,6 +77,8 @@ describe("Trigger.dev discovery schedules", () => {
       remotiveLimit: 50,
       leverLimit: 50,
       leverCompanies: ["spotify", "highspot", "aleph"],
+      cacheStrategy: "FRESH",
+      confirmRecentlyExhausted: false,
       scheduleGroup: "EVENING",
       profileIds: ["ai_augmented_development", "low_code_no_code"],
     });
@@ -164,6 +172,15 @@ describe("Trigger.dev discovery schedules", () => {
       "CONTROLLED_PUBLIC_JOB_DISCOVERY_KILL_SWITCH",
     );
     expect(controlled).not.toMatch(/schedules\.task|cron:/);
+  });
+
+  it("defines an unscheduled dashboard scan on the shared one-at-a-time queue", () => {
+    const dashboard = source(dashboardTaskFile);
+    expect(dashboard).toContain("DASHBOARD_PUBLIC_JOB_SCAN_TASK_ID");
+    expect(dashboard).toContain("queue: publicJobDiscoveryQueue");
+    expect(dashboard).toContain("maxAttempts: 1");
+    expect(dashboard).toContain("DASHBOARD_PUBLIC_JOB_SCAN_KILL_SWITCH");
+    expect(dashboard).not.toMatch(/schedules\.task|cron:/);
   });
 
   it("uses different intended retrieval hints by schedule group", () => {

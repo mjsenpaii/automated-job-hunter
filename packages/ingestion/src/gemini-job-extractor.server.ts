@@ -17,9 +17,18 @@ const GEMINI_CACHE_MAX_ENTRIES = 32;
 const MODEL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 
 type GenerateRequest = Parameters<GoogleGenAI['models']['generateContent']>[0];
+export interface GeminiGenerateContentUsageMetadata {
+  readonly promptTokenCount?: number;
+  readonly candidatesTokenCount?: number;
+  readonly totalTokenCount?: number;
+}
+
 export type GeminiGenerateContent = (
   request: GenerateRequest,
-) => Promise<{ readonly text?: string }>;
+) => Promise<{
+  readonly text?: string;
+  readonly usageMetadata?: GeminiGenerateContentUsageMetadata;
+}>;
 
 export type GeminiExtractionErrorCode =
   | 'MODEL_NOT_CONFIGURED'

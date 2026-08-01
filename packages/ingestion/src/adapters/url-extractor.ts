@@ -6,6 +6,12 @@ import type { ExtractedJobData, ExtractionResult } from '../types.js';
 
 export type { ExtractedJobData, ExtractionResult };
 
+export type ExtractedPageData = Partial<ExtractedJobData> & {
+  date_posted?: string;
+  date_expires?: string;
+  region?: string;
+};
+
 // --- SSRF hardening configuration ---
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB cap on fetched HTML
 export const MAX_REDIRECTS = 5;
@@ -198,13 +204,20 @@ interface JsonLdJobPosting {
   description?: string;
   employmentType?: string | string[];
   baseSalary?: unknown;
+  datePosted?: string;
+  validThrough?: string;
+  jobLocationType?: string;
+  url?: string;
+  applicantLocationRequirements?:
+    | { name?: string }
+    | Array<{ name?: string }>;
   hiringOrganization?: { name?: string; legalName?: string };
   jobLocation?:
-    | { address?: { addressLocality?: string; addressCountry?: string } }
-    | Array<{ address?: { addressLocality?: string; addressCountry?: string } }>;
+    | { address?: { addressLocality?: string; addressRegion?: string; addressCountry?: string } }
+    | Array<{ address?: { addressLocality?: string; addressRegion?: string; addressCountry?: string } }>;
 }
 
-export function extractFromJsonLd(html: string): Partial<ExtractedJobData> | null {
+export function extractFromJsonLd(html: string): ExtractedPageData | null {
   const $ = cheerio.load(html);
   const scripts = $('script[type="application/ld+json"]');
   let data: JsonLdJobPosting | null = null;
@@ -234,7 +247,7 @@ export function extractFromJsonLd(html: string): Partial<ExtractedJobData> | nul
 
   if (!data) return null;
 
-  const result: Partial<ExtractedJobData> = {};
+  const result: ExtractedPageData = {};
   if (data.title || data.name) result.title = data.title || data.name;
   if (data.hiringOrganization && (data.hiringOrganization.name || data.hiringOrganization.legalName)) {
     result.company = data.hiringOrganization.name || data.hiringOrganization.legalName;
@@ -250,38 +263,58 @@ export function extractFromJsonLd(html: string): Partial<ExtractedJobData> | nul
     result.salary_text =
       typeof data.baseSalary === 'string' ? data.baseSalary : JSON.stringify(data.baseSalary);
   }
+  if (data.datePosted) result.date_posted = data.datePosted;
+  if (data.validThrough) result.date_expires = data.validThrough;
+  if (data.url) result.application_url = data.url;
+  if (data.jobLocationType?.toUpperCase() === 'TELECOMMUTE') {
+    result.work_setup = 'REMOTE';
+  }
 
   if (data.jobLocation && Array.isArray(data.jobLocation) && data.jobLocation.length > 0) {
     const loc = data.jobLocation[0];
     if (loc?.address) {
       if (loc.address.addressLocality) result.city = loc.address.addressLocality;
+      if (loc.address.addressRegion) result.region = loc.address.addressRegion;
       if (loc.address.addressCountry) result.country = loc.address.addressCountry;
     }
   } else if (data.jobLocation && !Array.isArray(data.jobLocation) && data.jobLocation.address) {
     if (data.jobLocation.address.addressLocality) result.city = data.jobLocation.address.addressLocality;
+    if (data.jobLocation.address.addressRegion) result.region = data.jobLocation.address.addressRegion;
     if (data.jobLocation.address.addressCountry) result.country = data.jobLocation.address.addressCountry;
   }
 
+  const applicantLocations = Array.isArray(data.applicantLocationRequirements)
+    ? data.applicantLocationRequirements
+    : data.applicantLocationRequirements
+      ? [data.applicantLocationRequirements]
+      : [];
+  const allowedRegions = applicantLocations
+    .map((location) => location.name?.trim())
+    .filter((value): value is string => Boolean(value));
+  if (allowedRegions.length > 0) result.allowed_regions = allowedRegions;
+
   return result;
 }
 
-export function extractFromMetaTags(html: string): Partial<ExtractedJobData> | null {
+export function extractFromMetaTags(html: string): ExtractedPageData | null {
   const $ = cheerio.load(html);
   const title = $('meta[property="og:title"]').attr('content') || $('meta[name="twitter:title"]').attr('content');
   const description = $('meta[property="og:description"]').attr('content') || $('meta[name="twitter:description"]').attr('content') || $('meta[name="description"]').attr('content');
+  const company = $('meta[property="og:site_name"]').attr('content');
   
   if (!title && !description) return null;
   
-  const result: Partial<ExtractedJobData> = {};
+  const result: ExtractedPageData = {};
   if (title) result.title = title;
   if (description) result.description = description;
+  if (company) result.company = company;
   
   return result;
 }
 
-export function extractFromHtml(html: string): Partial<ExtractedJobData> | null {
+export function extractFromHtml(html: string): ExtractedPageData | null {
   const $ = cheerio.load(html);
-  const result: Partial<ExtractedJobData> = {};
+  const result: ExtractedPageData = {};
   
   const h1 = $('h1').first().text().trim();
   if (h1) result.title = h1;
@@ -351,7 +384,15 @@ export async function readCappedText(
  */
 export async function safeFetch(
   initialUrl: string,
+  options: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    resolveHost?: typeof resolveHostToPublicIps;
+  } = {},
 ): Promise<{ response?: Response; error?: string }> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const resolveHost = options.resolveHost ?? resolveHostToPublicIps;
   let currentUrl = initialUrl;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -363,17 +404,17 @@ export async function safeFetch(
 
     // 2. DNS-resolution validation for this hop.
     const { hostname } = new URL(currentUrl);
-    const dnsValidation = await resolveHostToPublicIps(hostname);
+    const dnsValidation = await resolveHost(hostname);
     if (!dnsValidation.ok) {
       return { error: dnsValidation.error };
     }
 
     // 3. Fetch this hop with its own timeout, without auto-following redirects.
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
     try {
-      response = await fetch(currentUrl, {
+      response = await fetchImpl(currentUrl, {
         headers: {
           'User-Agent': 'JobAppAI/1.0 (Job Research Tool)',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

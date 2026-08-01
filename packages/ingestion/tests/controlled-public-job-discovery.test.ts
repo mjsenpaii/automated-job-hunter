@@ -11,7 +11,7 @@ import {
   job_scores,
 } from '@job-app/db/schema';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   ControlledDiscoveryRepository,
   DiscoveryPersistenceRecord,
@@ -45,6 +45,25 @@ const VERIFIED_SKILLS: SkillEntry[] = [
     allowed_in_resume: true,
   },
 ];
+
+const LEGACY_SOURCE_SWITCHES = [
+  'JOB_DISCOVERY_ARBEITNOW_ENABLED',
+  'JOB_DISCOVERY_REMOTIVE_ENABLED',
+  'JOB_DISCOVERY_LEVER_ENABLED',
+] as const;
+const originalSourceSwitches = new Map(
+  LEGACY_SOURCE_SWITCHES.map((name) => [name, process.env[name]]),
+);
+beforeAll(() => {
+  for (const name of LEGACY_SOURCE_SWITCHES) process.env[name] = 'true';
+});
+afterAll(() => {
+  for (const name of LEGACY_SOURCE_SWITCHES) {
+    const original = originalSourceSwitches.get(name);
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
+  }
+});
 
 const VALID_PAYLOAD = {
   scheduleGroup: 'MORNING',
@@ -364,6 +383,20 @@ describe('controlled public-job persistence', () => {
         dependencies(inertRepository()),
       ),
     ).rejects.toBeInstanceOf(ControlledPersistenceGateError);
+  });
+
+  it('uses the shared source configuration and stops when every source is disabled', async () => {
+    const repository = inertRepository();
+    const fetchImpl = vi.fn();
+    const base = dependencies(repository, fetchImpl as typeof fetch);
+    const requirementsExtractor = vi.fn(base.requirementsExtractor);
+    const result = await runControlledPublicJobDiscovery(VALID_PAYLOAD, {
+      ...base, sourceEnvironment: {}, requirementsExtractor,
+    });
+    expect(result.finalStatus).toBe('NO_DISCOVERY_SOURCES_ENABLED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(requirementsExtractor).not.toHaveBeenCalled();
+    expect(repository.persistControlledBatch).not.toHaveBeenCalled();
   });
 
   it('does not persist filtered or untargeted records', async () => {
@@ -814,7 +847,7 @@ describe('controlled public-job persistence', () => {
     ).toBe(3);
   });
 
-  it('blocks all persistence when any discovery source fails', async () => {
+  it('isolates one source failure when another enabled source completes', async () => {
     const database = getDb(':memory:');
     const repository = createDiscoveryRepository(database);
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
@@ -839,15 +872,15 @@ describe('controlled public-job persistence', () => {
       { ...base, requirementsExtractor },
     );
 
-    expect(result.finalStatus).toBe('SOURCE_FAILED');
+    expect(result.finalStatus).toBe('COMPLETED');
     expect(result.jobsPersisted).toBe(0);
     expect(requirementsExtractor).not.toHaveBeenCalled();
     expect(database.select().from(jobs).all()).toHaveLength(0);
     expect(database.select().from(job_extractions).all()).toHaveLength(0);
-    expect(database.select().from(activity_log).all()).toHaveLength(0);
+    expect(database.select().from(activity_log).all()).toHaveLength(1);
     expect(
       database.select().from(job_discovery_persistence_runs).all(),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(JSON.stringify(result)).not.toContain('private network diagnostic');
   });
 

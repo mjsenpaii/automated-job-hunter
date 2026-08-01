@@ -9,6 +9,7 @@ const NAV_ITEMS: Array<{ label: string; href: string; icon: AppIconName }> = [
   { label: 'Import Job', href: '/import-job', icon: 'import' },
   { label: 'PH Jobs', href: '/ph-jobs', icon: 'briefcase' },
   { label: 'International', href: '/intl-jobs', icon: 'globe' },
+  { label: 'Freelance Jobs', href: '/freelance', icon: 'freelance' },
 ];
 
 export default function Sidebar({

@@ -5,7 +5,7 @@ import {
   detectJobInputKind,
   extractFromUrl,
   type ExtractedJobData,
-} from '@job-app/ingestion';
+} from '@job-app/ingestion/dashboard-server';
 
 export class JobInputPreparationError extends Error {
   constructor(

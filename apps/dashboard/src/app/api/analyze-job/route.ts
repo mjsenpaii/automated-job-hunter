@@ -4,7 +4,7 @@ import {
   enrichGeminiJobExtraction,
   normalizeGeminiExtraction,
 } from '@job-app/ingestion/gemini-contracts';
-import { cleanJobContent } from '@job-app/ingestion';
+import { cleanJobContent } from '@job-app/ingestion/dashboard-server';
 import { apiError } from '@job-app/ingestion/import-contracts';
 import {
   extractJobWithGemini,

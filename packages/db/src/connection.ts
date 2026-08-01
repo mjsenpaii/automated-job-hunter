@@ -2,6 +2,99 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3';
 import * as schema from './schema.js';
 
+type SqliteTableColumn = {
+  name: string;
+  notnull: number;
+};
+
+type SqliteIndex = {
+  name: string;
+  unique: number;
+};
+
+type SqliteIndexColumn = {
+  name: string;
+};
+
+function hasUniqueSingleColumnIndex(
+  sqlite: Database.Database,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const indexes = sqlite.prepare(`PRAGMA index_list('${tableName}')`).all() as SqliteIndex[];
+  return indexes.some((index) => {
+    if (index.unique !== 1) return false;
+    const safeIndexName = index.name.replaceAll("'", "''");
+    const columns = sqlite
+      .prepare(`PRAGMA index_info('${safeIndexName}')`)
+      .all() as SqliteIndexColumn[];
+    return columns.length === 1 && columns[0]?.name === columnName;
+  });
+}
+
+/**
+ * Upgrades the first Phase 7.1B.7A draft table without dropping opportunity
+ * data. SQLite's CREATE TABLE IF NOT EXISTS does not add later columns, so the
+ * local-first initializer needs an explicit, transactional additive migration.
+ */
+function ensureFreelanceOpportunitySchema(sqlite: Database.Database): void {
+  const columns = sqlite
+    .prepare(`PRAGMA table_info('freelance_opportunities')`)
+    .all() as SqliteTableColumn[];
+  const names = new Set(columns.map((column) => column.name));
+  const semanticIdentityIsUnique = names.has('semantic_identity_key') &&
+    hasUniqueSingleColumnIndex(
+      sqlite,
+      'freelance_opportunities',
+      'semantic_identity_key',
+    );
+
+  if (
+    names.has('semantic_identity_key') &&
+    names.has('opportunity_categories') &&
+    names.has('ethics_compliance_status') &&
+    semanticIdentityIsUnique
+  ) {
+    return;
+  }
+
+  sqlite.transaction(() => {
+    if (!names.has('semantic_identity_key')) {
+      sqlite.exec(`
+        ALTER TABLE freelance_opportunities
+          ADD COLUMN semantic_identity_key TEXT NOT NULL DEFAULT '';
+        UPDATE freelance_opportunities
+          SET semantic_identity_key = identity_key
+          WHERE semantic_identity_key = '';
+      `);
+    }
+    if (!names.has('opportunity_categories')) {
+      sqlite.exec(`
+        ALTER TABLE freelance_opportunities
+          ADD COLUMN opportunity_categories TEXT NOT NULL DEFAULT '[]';
+      `);
+    }
+    if (!names.has('ethics_compliance_status')) {
+      sqlite.exec(`
+        ALTER TABLE freelance_opportunities
+          ADD COLUMN ethics_compliance_status TEXT NOT NULL
+          DEFAULT 'REQUIRES_REVIEW';
+      `);
+    }
+    if (!hasUniqueSingleColumnIndex(
+      sqlite,
+      'freelance_opportunities',
+      'semantic_identity_key',
+    )) {
+      sqlite.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS
+          freelance_opportunities_semantic_identity_unique
+          ON freelance_opportunities (semantic_identity_key);
+      `);
+    }
+  })();
+}
+
 export function createDatabase(dbPath: string = './data/app.db'): Database.Database {
   const sqlite = new Database(dbPath);
   sqlite.pragma('journal_mode = WAL');
@@ -191,6 +284,302 @@ export function ensureSchema(sqlite: Database.Database): void {
         SELECT RAISE(ABORT, 'job discovery daily persistence limit exceeded');
       END;
 
+    CREATE TABLE IF NOT EXISTS tavily_search_cache (
+      query_hash TEXT PRIMARY KEY,
+      normalized_query TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('IN_FLIGHT', 'READY', 'FAILED')),
+      reservation_token TEXT,
+      result_json TEXT,
+      fetched_at TEXT,
+      expires_at TEXT,
+      reserved_until TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS tavily_search_cache_expires_at_idx
+      ON tavily_search_cache (expires_at);
+
+    CREATE TABLE IF NOT EXISTS tavily_search_credit_ledger (
+      reservation_token TEXT PRIMARY KEY,
+      philippine_date TEXT NOT NULL,
+      query_hash TEXT NOT NULL,
+      credits INTEGER NOT NULL CHECK (credits = 1),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS tavily_search_credit_ledger_ph_date_idx
+      ON tavily_search_credit_ledger (philippine_date);
+    CREATE TRIGGER IF NOT EXISTS tavily_search_credit_daily_limit
+      BEFORE INSERT ON tavily_search_credit_ledger
+      WHEN (
+        SELECT COALESCE(SUM(credits), 0)
+        FROM tavily_search_credit_ledger
+        WHERE philippine_date = NEW.philippine_date
+      ) + NEW.credits > 16
+      BEGIN
+        SELECT RAISE(ABORT, 'tavily daily credit limit exceeded');
+      END;
+
+    CREATE TABLE IF NOT EXISTS web_discovery_search_cache (
+      provider TEXT NOT NULL CHECK (provider IN ('TAVILY', 'GEMINI_SEARCH')),
+      cache_key TEXT NOT NULL,
+      normalized_request TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('IN_FLIGHT', 'READY', 'FAILED')),
+      reservation_token TEXT,
+      result_json TEXT,
+      fetched_at TEXT,
+      expires_at TEXT,
+      reserved_until TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (provider, cache_key)
+    );
+    CREATE INDEX IF NOT EXISTS web_discovery_search_cache_provider_key_idx
+      ON web_discovery_search_cache (provider, cache_key);
+    CREATE INDEX IF NOT EXISTS web_discovery_search_cache_expires_at_idx
+      ON web_discovery_search_cache (expires_at);
+
+    CREATE TABLE IF NOT EXISTS web_discovery_usage_ledger (
+      reservation_token TEXT PRIMARY KEY,
+      provider TEXT NOT NULL CHECK (provider IN ('TAVILY', 'GEMINI_SEARCH')),
+      operation TEXT NOT NULL CHECK (operation IN ('SEARCH', 'EXTRACT', 'PROMPT')),
+      philippine_date TEXT NOT NULL,
+      philippine_month TEXT NOT NULL,
+      cache_key TEXT,
+      counted_units INTEGER NOT NULL CHECK (counted_units >= 0),
+      consumed_units INTEGER NOT NULL CHECK (consumed_units >= 0),
+      daily_cap INTEGER NOT NULL CHECK (daily_cap > 0),
+      monthly_cap INTEGER CHECK (monthly_cap IS NULL OR monthly_cap > 0),
+      state TEXT NOT NULL CHECK (state IN ('RESERVED', 'COMPLETED', 'RELEASED')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS web_discovery_usage_provider_date_idx
+      ON web_discovery_usage_ledger (provider, philippine_date);
+    CREATE INDEX IF NOT EXISTS web_discovery_usage_provider_month_idx
+      ON web_discovery_usage_ledger (provider, philippine_month);
+    CREATE TRIGGER IF NOT EXISTS web_discovery_usage_daily_limit
+      BEFORE INSERT ON web_discovery_usage_ledger
+      WHEN (
+        SELECT COALESCE(SUM(counted_units), 0)
+        FROM web_discovery_usage_ledger
+        WHERE provider = NEW.provider
+          AND philippine_date = NEW.philippine_date
+      ) + NEW.counted_units > NEW.daily_cap
+      BEGIN
+        SELECT RAISE(ABORT, 'web discovery daily quota exceeded');
+      END;
+    CREATE TRIGGER IF NOT EXISTS web_discovery_usage_monthly_limit
+      BEFORE INSERT ON web_discovery_usage_ledger
+      WHEN NEW.monthly_cap IS NOT NULL AND (
+        SELECT COALESCE(SUM(counted_units), 0)
+        FROM web_discovery_usage_ledger
+        WHERE provider = NEW.provider
+          AND philippine_month = NEW.philippine_month
+      ) + NEW.counted_units > NEW.monthly_cap
+      BEGIN
+        SELECT RAISE(ABORT, 'web discovery monthly quota exceeded');
+      END;
+
+    CREATE TABLE IF NOT EXISTS web_discovery_query_group_runs (
+      run_key TEXT PRIMARY KEY,
+      query_group_id TEXT NOT NULL,
+      active_profile_key TEXT NOT NULL,
+      cache_strategy TEXT NOT NULL CHECK (cache_strategy IN ('CACHED', 'FRESH')),
+      philippine_date TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('SELECTED', 'COMPLETED', 'FAILED', 'CANCELLED')),
+      selected_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS web_discovery_query_group_selected_idx
+      ON web_discovery_query_group_runs (selected_at);
+
+    CREATE TABLE IF NOT EXISTS web_discovery_deep_scan_runs (
+      idempotency_key TEXT PRIMARY KEY,
+      trigger_run_id TEXT NOT NULL UNIQUE,
+      philippine_date TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'COMPLETED', 'FAILED', 'CANCELLED')),
+      verify_and_save INTEGER NOT NULL CHECK (verify_and_save IN (0, 1)),
+      cancel_requested INTEGER NOT NULL CHECK (cancel_requested IN (0, 1)),
+      stopping_reason TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS web_discovery_deep_scan_started_idx
+      ON web_discovery_deep_scan_runs (started_at);
+    CREATE INDEX IF NOT EXISTS web_discovery_deep_scan_trigger_run_idx
+      ON web_discovery_deep_scan_runs (trigger_run_id);
+
+    CREATE TABLE IF NOT EXISTS web_discovery_scan_checkpoints (
+      run_key TEXT NOT NULL,
+      batch_number INTEGER NOT NULL CHECK (batch_number > 0),
+      urls_attempted INTEGER NOT NULL CHECK (urls_attempted >= 0),
+      pages_parsed INTEGER NOT NULL CHECK (pages_parsed >= 0),
+      pages_recovered INTEGER NOT NULL CHECK (pages_recovered >= 0),
+      pages_rejected INTEGER NOT NULL CHECK (pages_rejected >= 0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (run_key, batch_number)
+    );
+    CREATE INDEX IF NOT EXISTS web_discovery_scan_checkpoint_run_batch_idx
+      ON web_discovery_scan_checkpoints (run_key, batch_number);
+
+    CREATE TABLE IF NOT EXISTS freelance_opportunities (
+      id TEXT PRIMARY KEY,
+      identity_key TEXT NOT NULL UNIQUE,
+      semantic_identity_key TEXT NOT NULL UNIQUE,
+      source TEXT NOT NULL,
+      source_identifier TEXT NOT NULL,
+      canonical_url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      client_or_company TEXT NOT NULL,
+      description_hash TEXT NOT NULL,
+      public_description TEXT NOT NULL,
+      published_at TEXT,
+      expires_at TEXT,
+      client_country TEXT,
+      geographic_restrictions TEXT NOT NULL,
+      timezone_restrictions TEXT NOT NULL,
+      remote INTEGER,
+      contract_type TEXT NOT NULL,
+      pay_kind TEXT NOT NULL,
+      original_currency TEXT,
+      budget_min REAL,
+      budget_max REAL,
+      pay_period TEXT,
+      stated_hourly_min REAL,
+      stated_hourly_max REAL,
+      estimated_effective_hourly_rate REAL,
+      pay_classification TEXT NOT NULL,
+      pay_evidence_label TEXT,
+      required_skills TEXT NOT NULL,
+      preferred_skills TEXT NOT NULL,
+      minimum_experience_years INTEGER,
+      seniority TEXT NOT NULL,
+      category_hints TEXT NOT NULL,
+      views TEXT NOT NULL,
+      opportunity_categories TEXT NOT NULL,
+      readiness TEXT NOT NULL,
+      readiness_json TEXT NOT NULL,
+      scam_risk TEXT NOT NULL,
+      scam_risk_reasons TEXT NOT NULL,
+      ethics_compliance_status TEXT NOT NULL,
+      ranking_score INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      preparation_state TEXT NOT NULL,
+      preparation_json TEXT NOT NULL,
+      manual_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS freelance_opportunities_status_idx
+      ON freelance_opportunities (status);
+    CREATE INDEX IF NOT EXISTS freelance_opportunities_readiness_idx
+      ON freelance_opportunities (readiness);
+    CREATE INDEX IF NOT EXISTS freelance_opportunities_risk_idx
+      ON freelance_opportunities (scam_risk);
+    CREATE INDEX IF NOT EXISTS freelance_opportunities_ranking_idx
+      ON freelance_opportunities (ranking_score);
+    CREATE INDEX IF NOT EXISTS freelance_opportunities_pay_idx
+      ON freelance_opportunities (pay_classification);
+
+    CREATE TABLE IF NOT EXISTS freelance_opportunity_sources (
+      opportunity_id TEXT NOT NULL REFERENCES freelance_opportunities(id),
+      source TEXT NOT NULL,
+      source_identifier TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      cost_classification TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (opportunity_id, source, source_identifier)
+    );
+    CREATE INDEX IF NOT EXISTS freelance_opportunity_sources_opportunity_idx
+      ON freelance_opportunity_sources (opportunity_id);
+
+    CREATE TABLE IF NOT EXISTS freelance_persistence_runs (
+      idempotency_key TEXT PRIMARY KEY,
+      philippine_date TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      persisted_count INTEGER NOT NULL CHECK (
+        persisted_count >= 0 AND persisted_count <= 20
+      ),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS freelance_persistence_runs_date_idx
+      ON freelance_persistence_runs (philippine_date);
+    CREATE TRIGGER IF NOT EXISTS freelance_persistence_runs_daily_limit
+      BEFORE INSERT ON freelance_persistence_runs
+      WHEN (
+        SELECT COALESCE(SUM(persisted_count), 0)
+        FROM freelance_persistence_runs
+        WHERE philippine_date = NEW.philippine_date
+      ) + NEW.persisted_count > 20
+      BEGIN
+        SELECT RAISE(ABORT, 'freelance daily persistence limit exceeded');
+      END;
+
+    CREATE TABLE IF NOT EXISTS freelance_scan_runs (
+      idempotency_key TEXT PRIMARY KEY,
+      trigger_run_id TEXT NOT NULL UNIQUE,
+      philippine_date TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('PREVIEW', 'SAVE')),
+      cache_strategy TEXT NOT NULL CHECK (cache_strategy IN ('CACHED', 'FRESH')),
+      query_group_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'COMPLETED', 'FAILED')),
+      saved_count INTEGER NOT NULL CHECK (saved_count >= 0 AND saved_count <= 20),
+      started_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS freelance_scan_runs_started_idx
+      ON freelance_scan_runs (started_at);
+
+    CREATE TABLE IF NOT EXISTS freelance_source_cache (
+      source TEXT NOT NULL CHECK (source IN ('HIMALAYAS', 'REMOTIVE')),
+      cache_key TEXT NOT NULL,
+      normalized_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY (source, cache_key)
+    );
+    CREATE INDEX IF NOT EXISTS freelance_source_cache_expires_idx
+      ON freelance_source_cache (expires_at);
+
+    CREATE TABLE IF NOT EXISTS freelance_opportunity_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      opportunity_id TEXT NOT NULL REFERENCES freelance_opportunities(id),
+      action TEXT NOT NULL,
+      safe_details TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS freelance_opportunity_events_opportunity_idx
+      ON freelance_opportunity_events (opportunity_id);
+
+    INSERT OR IGNORE INTO web_discovery_usage_ledger (
+      reservation_token,
+      provider,
+      operation,
+      philippine_date,
+      philippine_month,
+      cache_key,
+      counted_units,
+      consumed_units,
+      daily_cap,
+      monthly_cap,
+      state,
+      created_at,
+      updated_at
+    )
+    SELECT
+      'legacy-tavily-search:' || reservation_token,
+      'TAVILY',
+      'SEARCH',
+      philippine_date,
+      substr(philippine_date, 1, 7),
+      query_hash,
+      0,
+      0,
+      30,
+      900,
+      'RELEASED',
+      created_at,
+      created_at
+    FROM tavily_search_credit_ledger;
+
     WITH legacy_controlled_runs AS (
       SELECT
         id,
@@ -247,6 +636,8 @@ export function ensureSchema(sqlite: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  ensureFreelanceOpportunitySchema(sqlite);
 
   // Defensive, idempotent additive migration for older local databases.
   // This changes schema only; it never rewrites existing job rows.

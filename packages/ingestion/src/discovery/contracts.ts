@@ -10,9 +10,13 @@ import {
   type JobSearchProfileId,
 } from './job-search-profiles.v1.js';
 import type { VerifiedJobRequirementsExtraction } from '../job-requirements-contracts.js';
+import type { DiscoveryDiagnosticCollector } from './profile-coverage-diagnostics.js';
+import type { GeminiSearchReport } from '../adapters/gemini-web-search.server.js';
+import type { TavilyExtractReport } from '../adapters/tavily-extract.js';
+import type { WebSearchQueryGroupId } from './web-search-query-groups.v1.js';
 
 export const DiscoveryOptionsSchema = z.object({
-  limit: z.number().int().min(1).max(100),
+  limit: z.number().int().min(1).max(1000),
   pages: z.number().int().min(1).max(3),
   remoteOnly: z.boolean(),
   query: z.string(),
@@ -21,6 +25,33 @@ export const DiscoveryOptionsSchema = z.object({
   activeProfileIds: JobSearchProfileIdListSchema.optional(),
 });
 export type DiscoveryOptions = z.infer<typeof DiscoveryOptionsSchema>;
+
+export const ForumListingUpdateTypeSchema = z.enum([
+  'GEOGRAPHY',
+  'TIMEZONE',
+  'ROLE_STATUS',
+  'EXPERIENCE',
+  'PAY',
+  'SCOPE',
+]);
+
+export const ForumListingContextSchema = z.object({
+  originalPostText: z.string().trim().min(1).max(20_000),
+  originalPostPublishedAt: z.string().datetime().nullable(),
+  firstPartyUpdates: z.array(z.object({
+    publishedAt: z.string().datetime().nullable(),
+    updateTypes: z.array(ForumListingUpdateTypeSchema).min(1).max(6),
+    evidenceText: z.string().trim().min(1).max(20_000),
+  }).strict()).max(50),
+  latestFirstPartyUpdateAt: z.string().datetime().nullable(),
+  geographicRestrictions: z.array(z.string().trim().min(1).max(100)).max(30),
+  timezoneRestrictions: z.array(z.string().trim().min(1).max(100)).max(20),
+  minimumExperienceYears: z.number().int().min(1).max(50).nullable(),
+  payUpdateText: z.string().trim().min(1).max(20_000).nullable(),
+  roleClosed: z.boolean(),
+  potentiallyStale: z.boolean(),
+}).strict();
+export type ForumListingContext = z.infer<typeof ForumListingContextSchema>;
 
 export const DiscoveredJobSchema = z.object({
   sourceName: z.string().trim().min(1),
@@ -42,6 +73,7 @@ export const DiscoveredJobSchema = z.object({
   tags: z.array(z.string().trim().min(1)),
   publishedAt: z.string().datetime().nullable(),
   updatedAt: z.string().datetime().nullable().optional(),
+  forumListingContext: ForumListingContextSchema.nullable().optional(),
   sourceUrl: z.string().url(),
   applicationUrl: z.string().url().nullable(),
 });
@@ -54,6 +86,125 @@ export interface DiscoveryFetchResult {
   pagesFetched: number;
   jobs: DiscoveredJob[];
   companyFetchReport?: DiscoveryCompanyFetchReport;
+  tavilyFetchReport?: TavilyFetchReport;
+  webDiscoveryReport?: WebDiscoveryReport;
+}
+
+export interface TavilyWebSearchReport {
+  enabled: boolean;
+  status:
+    | 'DISABLED'
+    | 'COMPLETED'
+    | 'PARTIAL_FAILURE'
+    | 'FAILED'
+    | 'CACHED'
+    | 'DAILY_LIMIT_REACHED'
+    | 'MONTHLY_LIMIT_REACHED';
+  searchRequestsAttempted: number;
+  searchesCompleted: number;
+  cacheHits: number;
+  searchCreditsConsumed: number;
+  urlsDiscovered: number;
+  uniqueUrlsContributed: number;
+  dailyCreditsUsed: number;
+  dailyCreditsReserved: number;
+  dailyCreditsConfirmed: number;
+  dailyCreditsRemaining: number;
+  monthlyCreditsUsed: number;
+  monthlyCreditsReserved: number;
+  monthlyCreditsConfirmed: number;
+  monthlyCreditsRemaining: number;
+  sourceFailures: Array<{ queryId: string; code: TavilySourceFailureCode }>;
+}
+
+export type WebDiscoveryStoppingReason =
+  | 'COMPLETED'
+  | 'NO_SOURCES_AVAILABLE'
+  | 'QUERY_GROUPS_RECENTLY_EXHAUSTED'
+  | 'UNIQUE_URL_CAP_REACHED'
+  | 'ALL_QUERY_GROUPS_ATTEMPTED'
+  | 'NO_NEW_UNIQUE_URLS'
+  | 'TAVILY_DAILY_CREDIT_LIMIT_REACHED'
+  | 'TAVILY_MONTHLY_CREDIT_LIMIT_REACHED'
+  | 'GEMINI_SEARCH_DAILY_LIMIT_REACHED'
+  | 'CANCELLED'
+  | 'SAFETY_LIMIT_REACHED';
+
+export interface WebDiscoveryReport {
+  scanMode: 'NORMAL' | 'DEEP';
+  cacheStrategy: 'CACHED' | 'FRESH';
+  selectedQueryGroup: WebSearchQueryGroupId | null;
+  queryGroupsAttempted: WebSearchQueryGroupId[];
+  queryGroupsRecentlyExhausted: boolean;
+  uniqueUrlCap: 250 | 1000;
+  stoppingReason: WebDiscoveryStoppingReason;
+  tavilySearch: TavilyWebSearchReport;
+  geminiSearch: GeminiSearchReport;
+  tavilyExtract: TavilyExtractReport;
+  urlsBeforeDeduplication: number;
+  crossSourceDuplicates: number;
+  uniqueUrls: number;
+  urlsFoundByBothSources: number;
+  urlsQueuedForFetch: number;
+  uniqueUrlCapReached: boolean;
+  pagesFetchAttempted: number;
+  pagesFetchedDirectly: number;
+  pagesParsedDirectly: number;
+  pagesSentToExtract: number;
+  pagesRecoveredByExtract: number;
+  pagesRejected: number;
+  fetchFailuresByReason: Partial<Record<
+    | 'TIMEOUT'
+    | 'NETWORK'
+    | 'HTTP'
+    | 'NON_HTML'
+    | 'BODY_TOO_LARGE'
+    | 'UNPARSEABLE'
+    | 'INELIGIBLE_PAGE'
+    | 'UNSAFE_URL',
+    number
+  >>;
+  batchesCompleted: number;
+  directEmployerOrAtsPages: number;
+}
+
+export const TavilySourceFailureCodeSchema = z.enum([
+  'MISSING_API_KEY',
+  'DAILY_CREDIT_LIMIT_REACHED',
+  'MONTHLY_CREDIT_LIMIT_REACHED',
+  'QUERY_IN_FLIGHT',
+  'TIMEOUT',
+  'HTTP_ERROR',
+  'MALFORMED_JSON',
+  'SOURCE_SCHEMA_CHANGED',
+  'NETWORK_ERROR',
+  'PAGE_FETCH_FAILED',
+  'PAGE_REJECTED',
+  'UNKNOWN_SAFE_ERROR',
+]);
+export type TavilySourceFailureCode = z.infer<
+  typeof TavilySourceFailureCodeSchema
+>;
+
+export interface TavilySourceFailure {
+  queryId?: string;
+  code: TavilySourceFailureCode;
+}
+
+export interface TavilyFetchReport {
+  searchesAttempted: number;
+  searchesCompleted: number;
+  cacheHits: number;
+  creditsConsumed: number;
+  dailyCreditsRemaining: number;
+  urlsDiscovered: number;
+  uniqueUrls: number;
+  originalPagesFetched: number;
+  pagesParsedSuccessfully: number;
+  pagesRejected: number;
+  directEmployerOrAtsPages: number;
+  sourceFailures: TavilySourceFailure[];
+  dailyLimitReached: boolean;
 }
 
 export const DiscoveryCompanyFetchErrorCodeSchema = z.enum([
@@ -114,7 +265,13 @@ export type ControlledPersistenceIdempotencyStatus =
 
 export type ControlledPersistenceRunKind =
   | 'MANUAL_CONTROLLED'
-  | 'SCHEDULED_MORNING';
+  | 'SCHEDULED_MORNING'
+  | 'DASHBOARD_SCAN';
+
+export type DiscoveryProcessingStage =
+  | 'REMOVING_DUPLICATES'
+  | 'APPLYING_FILTERS'
+  | 'MATCHING_PROFILES';
 
 export interface DailyPersistenceState {
   philippineDate: string;
@@ -191,6 +348,7 @@ export interface DiscoveryRunSummary {
   untargeted: number;
   vibeCodingRolesFound: number;
   duplicates: number;
+  profileMatchedDuplicates?: number;
   hardRejectedJobs: number;
   eligibleScoredJobs: number;
   pipelineErrors: number;
@@ -200,6 +358,8 @@ export interface DiscoveryRunSummary {
   preview: DiscoveryPreview[];
   profileStats: DiscoveryProfileStats[];
   companyFetchReport?: DiscoveryCompanyFetchReport;
+  tavilyFetchReport?: TavilyFetchReport;
+  webDiscoveryReport?: WebDiscoveryReport;
 }
 
 export interface DiscoveryDeduplicationContext {
@@ -232,4 +392,6 @@ export interface DiscoveryRunDependencies {
   repository: DiscoveryRepository;
   verifiedSkills: SkillEntry[];
   deduplicationContext?: DiscoveryDeduplicationContext;
+  diagnosticCollector?: DiscoveryDiagnosticCollector;
+  onProcessingStage?: (stage: DiscoveryProcessingStage) => void;
 }

@@ -1,10 +1,122 @@
 # Public Job Discovery
 
+## Phase 7.1B.6B combined web-discovery strategy
+
+Tavily Basic Search and Gemini Google Search are independent public-URL
+discovery sources. Source selection is resolved once on the worker with exact
+environment switches:
+
+- `JOB_DISCOVERY_TAVILY_ENABLED=true`
+- `JOB_DISCOVERY_GEMINI_SEARCH_ENABLED=true`
+- `JOB_DISCOVERY_TAVILY_EXTRACT_ENABLED=true`
+- `JOB_DISCOVERY_DEEP_SCAN_ENABLED=true`
+- `JOB_DISCOVERY_ARBEITNOW_ENABLED=true`
+- `JOB_DISCOVERY_REMOTIVE_ENABLED=true`
+- `JOB_DISCOVERY_LEVER_ENABLED=true`
+
+Only exact lowercase `true` enables a feature or source. Arbeitnow, Remotive,
+and Lever remain available for explicit controlled comparison but are disabled
+by default. They are optional sources, not fallbacks. A web-source limit or
+outage never activates them. If every discovery source is disabled, the shared
+collector returns `NO_DISCOVERY_SOURCES_ENABLED` with no network, model, job
+persistence, application, or submission operation.
+
+The root worker `.env.local` owns `GEMINI_API_KEY`, `GEMINI_MODEL`,
+`GEMINI_SEARCH_MODEL`, `TAVILY_API_KEY`, the four web feature switches, the
+three optional legacy-source switches, and the Tavily/Gemini Search quota
+caps. The Next.js `apps/dashboard/.env.local` remains limited to server-side
+`TRIGGER_SECRET_KEY` and `JOB_DISCOVERY_DASHBOARD_SCAN_ENABLED`. Real files are
+ignored; tracked `.env.example` files contain empty secrets and disabled
+switches. No provider key, model configuration, quota, or source switch is
+placed in `NEXT_PUBLIC_*` state or a browser bundle.
+
+Dashboard classifications are informational and contain no currency estimate:
+
+- Tavily Basic Search — API credits
+- Tavily Basic Extract — API credits
+- Gemini Search — API quota
+- Gemini verification — model API usage
+- Arbeitnow public feed — `FREE`
+- Remotive public feed — `FREE`
+- Lever public postings — `FREE`, limited to configured company boards
+
+### Cached/fresh queries and source boundaries
+
+- Four fixed eight-intent groups cover entry-level software, mobile/backend,
+  AI/workflow automation, and direct employer/ATS vacancies. Gemini never
+  invents or expands them. Fresh group selection is deterministic from the
+  PHT date, active profiles, six-hour cache state, and persisted recent group
+  history. It avoids the last group while another eligible group exists.
+- `CACHED` is the dashboard default. Valid Tavily and Gemini Search caches are
+  reused without fresh search quota, so repeated scans can intentionally show
+  identical results. `FRESH` rotates to another eligible group. When all four
+  were run within six hours, `QUERY_GROUPS_RECENTLY_EXHAUSTED` requires an
+  explicit override before quota is spent on the oldest group.
+- Normal fresh scans run enabled Tavily Basic Search and Gemini Search together
+  and independently, up to eight requests/prompts each. They merge canonical
+  URL attribution as `TAVILY`, `GEMINI_SEARCH`, or `BOTH`, then stop at 250
+  combined unique URLs. One source failure does not stop the other.
+- Tavily remains Basic Search only: no generated answer, raw-content search,
+  images, Advanced Search, Crawl, Map, or Research. Gemini Search uses only the
+  explicitly configured `GEMINI_SEARCH_MODEL` and supported Google Search
+  grounding. Its generated text is discarded.
+- Tavily snippets and Gemini Search text are URL leads only. Each URL must pass
+  HTTP/HTTPS/public-network and unsafe-page checks, canonicalization, and
+  original-page retrieval with SSRF/redirect/size/timeout protection.
+- Original-page parsing prefers JSON-LD `JobPosting`, then attributable known
+  ATS/employer metadata, then conservative page extraction. A job needs title,
+  employer, canonical URL, and meaningful original-page text. Unparseable
+  pages cannot reach matching, verification, or persistence.
+- Tavily Basic Extract is fetch recovery only after eligible direct retrieval
+  fails or yields an unusable public job body. It is never used for login,
+  authentication, CAPTCHA, private/internal, search, submission, unsafe
+  redirect, or prohibited pages. Recovered content must pass the same
+  attributable-candidate checks and raw provider responses are not stored.
+- Tavily Search and Extract share a persistent transactional 30-credit PHT-day
+  and 900-credit PHT-month budget. Extract usage comes from provider response
+  metadata. Gemini Search has a separate persistent 60-prompt PHT-day cap.
+  Caps apply across dashboard, scheduled, controlled, and diagnostic entries.
+- Preview may spend search/extract quota only when fresh work is requested, but
+  makes zero verification calls, writes no jobs, and consumes no job slots.
+  Save calls verification only for final new saveable matches and retains the
+  shared five-job PHT-day cap and all-or-nothing persistence boundary.
+
+### Deep Web Scan
+
+Deep Web Scan is `DEVELOPMENT`-only, requires
+`JOB_DISCOVERY_DEEP_SCAN_ENABLED=true` plus explicit confirmation, and is
+preview-only by default. It uses the same four fixed groups and enabled web
+sources, stops at a hard cap of 1,000 unique canonical public URLs, and does
+not promise to find that many. It allows at most 40 Tavily Search requests, 40
+Gemini Search prompts, 200 Extract attempts/recoveries, and 100 page attempts
+per batch, subject to the smaller remaining daily/monthly quotas. Original-page
+fetches use global concurrency five and per-host concurrency one.
+
+Only one Deep Scan may start in a rolling seven Asia/Manila days. Persistent
+idempotency, cooldown, cancellation, and body-free batch checkpoints survive
+worker restarts. `Cancel future batches` stops unstarted work but cannot
+interrupt an active atomic persistence transaction. Optional `Verify and save
+top new matches` is unchecked by default; when explicitly selected it verifies
+at most ten new matches and saves no more than the existing daily job capacity.
+No mode creates or submits an application.
+
+Dashboard metrics distinguish query group/cache strategy, each search source,
+cross-source URL deduplication, direct-page parsing, Extract recovery, profile
+matches, existing matches, new saveable matches, selected verification calls,
+and saved jobs. Actual token usage is shown when reported; otherwise it says
+`Usage unavailable`. Live Phase 7.1B.6B validation remains pending.
+Final combined mocked verification passed 632/632 tests, the 6/6 workspace
+build, standalone dashboard production build, dashboard/ingestion strict
+TypeScript, and the client-bundle security scan. The build is deployable, but
+production-mutating discovery remains intentionally disabled by the existing
+environment and exact-switch gates pending a separate production rollout. No
+provider or model call was made by final release verification.
+
 ## Phase 7.1A scope
 
-Phase 7.1A proves public, structured job discovery before Trigger.dev scheduling
-is introduced. It implements a reusable discovery core with three source
-adapters: Arbeitnow, Remotive, and selected public Lever company boards.
+Phase 7.1A originally proved structured discovery before Trigger.dev
+scheduling. Its Arbeitnow, Remotive, and selected Lever adapters remain intact,
+but Phase 7.1B.6A and 6B disable them by default behind independent exact switches.
 
 The flow is:
 
@@ -600,3 +712,157 @@ monitored before evening persistence is considered.
 
 See `docs/JOB_REQUIREMENTS_EXTRACTION.md` for the detailed data model and
 verification contract.
+
+## Phase 7.1B.5C dashboard manual scans
+
+Task ID: `public-job-discovery-dashboard-scan`
+
+The dashboard Overview page exposes one compact `Scan Jobs` action with three
+explicit modes and a cached/fresh discovery choice for normal scans:
+
+- `Preview Scan` runs the existing source adapters, validation,
+  orchestration-wide identity deduplication, local filters, fixed morning
+  profile matching, and matcher-audit summaries. It performs zero requirements
+  Gemini calls, writes zero jobs, and does not reserve a daily save slot. It
+  therefore remains usable when the PHT-day save budget is exhausted.
+- `Scan & Save` uses the same fixed morning profiles and existing verified
+  persistence sequence: unique persistence-candidate selection, at most five
+  candidate-first Flash-Lite calls, deterministic verification, recomputation
+  from verified facts only, and one all-or-nothing SQLite transaction. It
+  shares the persistent five-job Asia/Manila-day budget with scheduled morning
+  and manual controlled runs.
+- `Deep Web Scan` is explicitly confirmed, development-only, preview-only by
+  default, and subject to its seven-PHT-day cooldown plus the 1,000-URL hard
+  cap. Its optional verification/save checkbox is off by default.
+
+`Use cached results` is the normal default and can intentionally repeat recent
+listings at zero fresh Search/prompt quota when all selected caches are valid.
+`Use fresh web results` rotates to another deterministic fixed group and may
+consume Tavily and Gemini Search quota. Neither option guarantees new jobs.
+
+The unscheduled dashboard task is registered on the same concurrency-one queue
+as the existing discovery tasks, with one task attempt, a 30-minute TTL, and a
+600-second maximum duration. It requires `DEVELOPMENT`, its dedicated task ID,
+and `JOB_DISCOVERY_DASHBOARD_SCAN_ENABLED` exactly equal to lowercase `true`.
+This switch is separate from
+`JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED` and
+`JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED`; none is exposed to client code.
+
+The strict payload contains a closed mode (`PREVIEW`, `SAVE`, or `DEEP`), the
+cached/fresh choice, bounded confirmation flags, and a bounded idempotency key.
+Server routes require same-origin POST semantics, trigger only the fixed task
+ID, return only closed progress/result contracts, expose a safe future-batch
+cancellation action for Deep Scan, and permit one active dashboard scan per
+dashboard server process. Trigger.dev task
+idempotency and the SQLite ledger remain authoritative across process restarts.
+The shared queue prevents dashboard and scheduled write operations from running
+concurrently, while the SQLite transaction and daily-limit trigger enforce the
+durable write cap.
+
+The modal reports named stages rather than fake percentages. Completed results
+include query/cache choice, Search/Extract quotas, URL attribution and
+deduplication, direct/recovered/rejected pages, profile/near-match counts, safe
+source failures, selected and persisted counts, remaining daily slots, and
+elapsed time. Requirements Gemini calls aggregate actual provider
+`usageMetadata` for input, output, and total tokens. If metadata is absent or a
+call fails before returning it, the affected totals are `null` and the UI shows
+`Usage unavailable`; the system never estimates tokens.
+
+Phase 7.1B.6B did not run a live dashboard scan or external provider/model
+call. Combined search, Extract, Deep Scan, persistence, and UI behavior were
+verified with deterministic mocks. An early focused test may have written only
+mock web cache/usage/query-history rows to the default local SQLite store before
+the injected-repository fallback was changed to in-memory; no job-persistence
+repository was used. That web-ledger state was not inspected or cleaned in this
+phase. All subsequent tests use isolated stores. Live 6B validation remains
+pending.
+The independent 08:00 DEVELOPMENT morning schedule continues to operate under
+its own switch. Evening remains DRY_RUN-only, production persistence remains
+disabled, and no application/submission/document/messaging automation is part
+of the dashboard task.
+
+## Phase 7.1B.5B profile-matcher coverage audit
+
+The profile coverage audit is a diagnostic-only view over the existing morning
+orchestration. It does not change local filters, profile rules, deduplication,
+scoring, or persistence. It records a safe reason at each actual boundary:
+
+1. source validation;
+2. normalization;
+3. deduplication;
+4. local filters;
+5. deterministic profile matching;
+6. the existing ingestion pipeline.
+
+Reason codes are closed and include invalid record, duplicate, excluded title,
+employment/location exclusion, seniority/experience rejection, unrelated role
+family, insufficient positive evidence, conflicting negative evidence,
+untargeted, and a safe existing-reason fallback. Counts are diagnostic events
+and can overlap when a source record is both filtered and a known duplicate.
+Near-match output contains title, company, source, short configured signal
+labels, exact blocker, and blocker timing; it never contains descriptions.
+
+The single Phase 7.1B.5B live dry-run fetched 134 records: Arbeitnow 50,
+Remotive 34, and Lever 50. All passed provider validation. After canonical
+identity handling there were 105 unique accepted candidates at this provider
+snapshot. Local filters excluded 112 source variants: 47 Arbeitnow and 41
+Lever records had no explicit remote indicator, and 24 Remotive records had a
+category other than the fixed local `software-dev` category. Twelve candidates
+reached profile matching and remained untargeted.
+
+For Software Development, 30 unique candidates had at least one configured
+signal and nine had valid primary title evidence before local filtering and
+database deduplication. Four of those nine were location-filtered and five were
+already-saved duplicates (four LawnStarter variants and one A.Team role), so
+zero new unique match reached scoring. Representative pre-match exclusions
+included Idnow and Walaris software-engineer roles plus two Highspot principal
+software-engineer roles. The near-match list also exposed precision-safe title
+coverage gaps such as Android Engineer and a Full-Stack Rails Engineer.
+
+For AI Automation, 13 candidates had supporting signals and zero had valid
+primary evidence. Lemon.io AI/LLM/technology text, source categories, and a
+sales/operations role mentioning Zapier or Power Automate were correctly
+insufficient. This is primarily a current-pool/retrieval limitation, not proof
+that supporting evidence should be promoted to primary evidence.
+
+The dry-run made zero Gemini calls, wrote zero jobs/scores, and created zero
+applications or submissions. The root cause is mixed: restrictive explicit
+remote/category filters and existing duplicates removed all current software
+hits; the available pool lacked a valid AI Automation role; and a small exact
+software-title coverage gap exists. No normalization defect was found. The
+recommended next change is a separately reviewed, test-backed exact-title
+addition beginning with Android Engineer, plus an independent review of the
+single-request Remotive category recall tradeoff. Broad matcher loosening is
+not recommended.
+
+## Separate freelance opportunity discovery (Phase 7.1B.7A)
+
+Freelance discovery is separate from the regular PH/international employment
+lists, matcher profiles, regular score, and five-job daily budget. The
+`/freelance` dashboard starts only the unscheduled
+`freelance-opportunity-dashboard-scan` task; neither recurring schedule runs it.
+
+Enabled freelance sources are the public no-key Himalayas JSON API, the public
+no-key Remotive API with explicit contract/freelance classification, Tavily URL
+discovery through the existing credit ledger, and optional Gemini Search URL
+discovery. Manual public URL import reuses the SSRF boundary. Tavily snippets
+and Gemini-generated search text never become evidence. Upwork and
+Freelancer.com remain pending official API integrations and are not scraped.
+
+Preview performs normalization, deduplication, pay/readiness/risk
+classification, and ranking but writes no opportunity. Scan & Save uses a
+separate atomic maximum-20-per-PHT-day freelance ledger, preserves source
+attribution, and accepts only LOW/MEDIUM-risk non-expired records. It never
+creates a regular job, application, proposal, bid, message, submission, or
+contract.
+
+Readiness is broader than verified current skills while remaining truthful.
+`LEARNABLE FAST WITH AI` is allowed only for narrow missing skills adjacent to
+verified skills with a deterministic 4–24-hour practice/sample template. AI
+availability alone, material experience, mandatory credentials, regulated
+work, senior ownership, or high-risk scope produces `NOT READY`. Learnable work
+requires the local manual preparation-complete action before it becomes
+application-ready. See `FREELANCE_OPPORTUNITY_DISCOVERY.md`.
+
+No live Phase 7.1B.7A scan has occurred; source behavior is currently verified
+only with deterministic mocks and isolated databases.

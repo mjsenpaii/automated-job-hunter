@@ -346,9 +346,11 @@ export function parseLeverCliArgs(
   }
 
   const parsed = DiscoveryOptionsSchema.safeParse(candidate);
-  if (!parsed.success) {
+  if (!parsed.success || candidate.limit > 100) {
     throw new DiscoveryCliError(
-      parsed.error.issues[0]?.message ?? 'Invalid discovery options.',
+      !parsed.success
+        ? parsed.error.issues[0]?.message ?? 'Invalid discovery options.'
+        : '--limit must be between 1 and 100.',
     );
   }
   return {

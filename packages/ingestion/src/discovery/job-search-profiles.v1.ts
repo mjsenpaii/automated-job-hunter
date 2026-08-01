@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ProfileCoverageDecision } from './profile-coverage-diagnostics.js';
 
 /**
  * Versioned Job Search Profiles (v1).
@@ -1080,6 +1081,48 @@ function collectProfileEvidence(
     ...primaryEvidence,
     ...strictSupportingEvidence(profile, corpus),
   ]);
+}
+
+/**
+ * Explain the current matcher without changing its decision. The returned
+ * signals are the matcher's configured, short evidence labels only; source
+ * passages are never included.
+ */
+export function diagnoseJobSearchProfileCoverage(
+  job: ProfileMatchableJob,
+  activeProfileIds: readonly JobSearchProfileId[] = getEnabledJobSearchProfileIds(),
+): ProfileCoverageDecision[] {
+  const active = new Set(activeProfileIds);
+  const corpus = buildSearchCorpus(job);
+
+  return JOB_SEARCH_PROFILES_V1.filter(
+    (profile) => profile.enabled && active.has(profile.id),
+  )
+    .sort((a, b) => a.priority - b.priority)
+    .map((profile): ProfileCoverageDecision => {
+      const guardedTitle = STRICT_GUARDED_TITLE_RULES.some((pattern) =>
+        pattern.test(corpus.title),
+      );
+      const primaryEvidence = uniqueEvidence([
+        ...(guardedTitle ? [] : strictTitleEvidence(profile, corpus.title)),
+        ...strictDescriptionEvidence(profile, corpus),
+      ]);
+      const supportingEvidence = strictSupportingEvidence(profile, corpus);
+      const matched = primaryEvidence.length > 0;
+      return {
+        profileId: profile.id,
+        matched,
+        positiveSignals: uniqueEvidence([
+          ...primaryEvidence,
+          ...supportingEvidence,
+        ]),
+        blocker: matched
+          ? null
+          : guardedTitle
+            ? 'EXCLUDED_TITLE'
+            : 'INSUFFICIENT_POSITIVE_EVIDENCE',
+      };
+    });
 }
 
 /**

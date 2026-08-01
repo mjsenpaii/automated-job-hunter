@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { MetricCard } from '@/components/MetricCard';
 import { PageHeader } from '@/components/PageHeader';
 import StatusBadge from '@/components/StatusBadge';
+import { JobScanControl } from '@/components/JobScanControl';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,10 +76,13 @@ export default async function DashboardHome() {
         title="Overview"
         description="A concise view of imported opportunities and the decisions that need your attention."
         action={
-          <Link href="/import-job" className="button button-primary">
-            <AppIcon name="import" size={18} />
-            Import job
-          </Link>
+          <div className="dashboard-header-actions">
+            <JobScanControl />
+            <Link href="/import-job" className="button button-primary">
+              <AppIcon name="import" size={18} />
+              Import job
+            </Link>
+          </div>
         }
       />
 

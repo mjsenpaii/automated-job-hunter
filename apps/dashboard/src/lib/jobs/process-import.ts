@@ -14,7 +14,7 @@ import {
   type ConfirmScoreRequest,
   type JobImportResult,
   type RawJobInput,
-} from '@job-app/ingestion';
+} from '@job-app/ingestion/dashboard-server';
 import { getDatabase } from '@/lib/db';
 import { getVerifiedSkills } from '@/lib/verified-skills';
 

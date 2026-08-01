@@ -16,13 +16,15 @@ import type {
   ControlledPersistenceWriteResult,
   DiscoveryPersistenceRecord,
 } from './contracts.js';
+import { PUBLIC_JOB_DISCOVERY_DAILY_LIMIT } from './limits.js';
 
 const CONTROLLED_DISCOVERY_ACTIVITY =
   'CONTROLLED_PUBLIC_JOB_DISCOVERY_COMPLETED';
 const SCHEDULED_MORNING_DISCOVERY_ACTIVITY =
   'SCHEDULED_MORNING_PUBLIC_JOB_DISCOVERY_COMPLETED';
+const DASHBOARD_SCAN_DISCOVERY_ACTIVITY =
+  'DASHBOARD_PUBLIC_JOB_DISCOVERY_COMPLETED';
 const CONTROLLED_DISCOVERY_ENTITY_TYPE = 'system';
-const PUBLIC_JOB_DISCOVERY_DAILY_LIMIT = 5 as const;
 
 function validatePhilippineDate(value: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -268,7 +270,9 @@ export function createDiscoveryRepository(
               action:
                 controls.runKind === 'SCHEDULED_MORNING'
                   ? SCHEDULED_MORNING_DISCOVERY_ACTIVITY
-                  : CONTROLLED_DISCOVERY_ACTIVITY,
+                  : controls.runKind === 'DASHBOARD_SCAN'
+                    ? DASHBOARD_SCAN_DISCOVERY_ACTIVITY
+                    : CONTROLLED_DISCOVERY_ACTIVITY,
               entity_type: CONTROLLED_DISCOVERY_ENTITY_TYPE,
               entity_id: controls.idempotencyKey,
               details: JSON.stringify({

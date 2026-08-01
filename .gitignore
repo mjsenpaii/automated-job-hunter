@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+/.env.local
 *.private.json
 candidate/profile.private.json
 candidate/preferences.private.json
@@ -12,6 +13,10 @@ logs/
 .turbo
 coverage
 .next
+/apps/dashboard/.next-*/
+/.agents/
+/.codex/
+/skills-lock.json
 *.db
 *.db-journal
 *.db-wal

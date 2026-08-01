@@ -26,6 +26,8 @@ const baseFixedPayload = {
   remotiveLimit: 50,
   leverLimit: 50,
   leverCompanies: ["spotify", "highspot", "aleph"],
+  cacheStrategy: "FRESH",
+  confirmRecentlyExhausted: false,
 } as const;
 
 export type PublicJobDiscoveryScheduleLabel = "MORNING" | "EVENING";

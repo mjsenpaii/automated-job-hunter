@@ -104,6 +104,32 @@ describe('server-only candidate-first Gemini requirements extraction', () => {
     );
   });
 
+  it('reports only actual Gemini usage metadata and preserves unavailable values', async () => {
+    const rawDescription = 'No requirements stated.';
+    const supplied = candidates(rawDescription);
+    const onUsage = vi.fn();
+    await extractVerifiedJobRequirements(
+      { title: 'Backend Engineer', company: 'Example', rawDescription },
+      {
+        generateContent: vi.fn(async () => ({
+          text: JSON.stringify({ decisions: supplied.map(ignored) }),
+          usageMetadata: {
+            promptTokenCount: 71,
+            candidatesTokenCount: 12,
+            totalTokenCount: 83,
+          },
+        })),
+        modelIdentifier: 'configured-test-model',
+        onUsage,
+      },
+    );
+    expect(onUsage).toHaveBeenCalledWith({
+      inputTokens: 71,
+      outputTokens: 12,
+      totalTokens: 83,
+    });
+  });
+
   it('accepts ten geographic restrictions and rejects eleven', () => {
     const locationCandidate: JobRequirementCandidate = {
       candidateId: 'location-1',

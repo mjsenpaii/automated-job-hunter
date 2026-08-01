@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { extractFromUrl, apiError, validateUrl } from '@job-app/ingestion';
+import {
+  extractFromUrl,
+  apiError,
+  validateUrl,
+} from '@job-app/ingestion/dashboard-server';
 
 export async function POST(request: Request) {
   try {

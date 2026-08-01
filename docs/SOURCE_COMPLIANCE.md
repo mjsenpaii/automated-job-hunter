@@ -3,6 +3,12 @@
 **IMPORTANT**: Only sources explicitly approved below are enabled. New sources
 must be documented before implementation.
 
+Phase 7.1B.6B keeps Tavily primary and adds independently gated Gemini Google
+Search for public-URL discovery plus Tavily Basic Extract for eligible fetch
+recovery. Arbeitnow, Remotive, and Lever remain approved but disabled by
+default behind their own exact switches. They are never automatic fallbacks.
+Live Phase 7.1B.6B validation is pending.
+
 Phase 7.1B.5A live validation used only the approved Arbeitnow, Remotive, and
 configured Lever paths. DEVELOPMENT run `run_06frj6g5id1v7jt47pv73m7e01`
 fetched 134 records and persisted zero because no record matched the fixed
@@ -10,6 +16,14 @@ morning profiles. No application or submission occurred. Evening remains
 DRY_RUN-only, production persistence remains disabled, and additional daily
 morning outcomes must be monitored before any broader scheduled persistence is
 considered.
+
+Phase 7.1B.5C adds a development-only dashboard entry point to the same approved
+APIs; it does not add a source, arbitrary host, employer crawl, or application
+request. Preview and Save each perform the existing bounded source fetches when
+explicitly started. Operators must count dashboard scans alongside scheduled
+and CLI runs when observing provider request guidance, especially Remotive's
+four-fetches-per-day recommendation. No live dashboard scan was performed
+during implementation.
 
 ## Source Documentation Template
 For every job board or data source, document the following before enabling:
@@ -21,6 +35,78 @@ For every job board or data source, document the following before enabling:
 - **Permitted Automation**: 
 - **Restrictions**: 
 - **Compliance Status**: (Approved / Pending / Rejected)
+
+---
+
+## Tavily Basic Search
+
+- **Name**: Tavily Basic Search
+- **Access Method**: Official Search API used only for public job-URL discovery
+- **Endpoint**: `https://api.tavily.com/search`
+- **Official API reference**: https://docs.tavily.com/documentation/api-reference/endpoint/search
+- **Official credit documentation**: https://docs.tavily.com/documentation/api-credits
+- **Authentication**: Worker-only bearer API key; never available to Next.js
+  client code or returned scan payloads.
+- **Rate/Credit Limits**: Basic Search only. Normal scans use at most eight
+  requests and ten results per query; Deep Scan uses at most 40 Search requests.
+  Search and Basic Extract share a transactionally enforced 30-credit
+  Asia/Manila-day and 900-credit Asia/Manila-month project budget. Identical
+  normalized queries use a six-hour cache at zero additional credit.
+- **Permitted Automation**: Bounded public URL discovery followed by retrieval
+  and deterministic parsing of the original public job page.
+- **Restrictions**: No Advanced Search, generated answer, raw-content search,
+  Crawl, Map, Research, login, CAPTCHA bypass, application retrieval or
+  submission, robots/rate-limit bypass, or use of snippets as job evidence.
+  Unsafe and unparseable pages are rejected before matching or verification.
+- **Compliance Status**: Implemented for development-only discovery behind
+  `JOB_DISCOVERY_TAVILY_ENABLED=true`; live Phase 7.1B.6B validation pending.
+  Preview has no verification/job writes. Save retains verified extraction,
+  the atomic five-job PHT-day cap, and zero application/submission behavior.
+  Production persistence remains disabled.
+
+---
+
+## Tavily Basic Extract
+
+- **Name**: Tavily Basic Extract
+- **Access Method**: Official Extract API, only as recovery after an eligible
+  direct public-page fetch/parser failure
+- **Endpoint**: `https://api.tavily.com/extract`
+- **Official API reference**: https://docs.tavily.com/documentation/api-reference/endpoint/extract
+- **Authentication**: The same worker-only Tavily bearer key; never dashboard
+  client state or output.
+- **Rate/Credit Limits**: At most 25 attempted/recovered URLs in a normal scan
+  and 200 in Deep Scan, in batches of five. Provider-reported Extract credits
+  consume the same daily/monthly Tavily ledger as Search.
+- **Permitted Automation**: Recovery of a specific attributable public vacancy
+  URL after direct retrieval times out, returns an unusable public body, or
+  produces a JavaScript shell with no meaningful vacancy content.
+- **Restrictions**: Never used on authentication/login, CAPTCHA, private or
+  internal addresses, search results, application forms, unsafe redirects,
+  prohibited sources, or generic career pages. Recovered content is revalidated
+  and raw Extract responses are not persisted.
+- **Compliance Status**: Development-only and disabled unless
+  `JOB_DISCOVERY_TAVILY_EXTRACT_ENABLED=true`; live validation pending.
+
+---
+
+## Gemini Google Search grounding
+
+- **Name**: Gemini Search
+- **Access Method**: Google Search grounding through the installed Gemini SDK,
+  using the separately configured worker-only `GEMINI_SEARCH_MODEL`
+- **Authentication**: Worker-only Gemini API key; no dashboard/client access.
+- **Rate/Quota Limits**: Normal scans use at most eight prompts and Deep Scan at
+  most 40 prompts, within a transactionally enforced 60-prompt Asia/Manila-day
+  project cap. Identical normalized model/prompt inputs use a six-hour cache.
+- **Permitted Automation**: Public job-URL discovery from grounding metadata.
+  Tavily and Gemini Search may run together and fail independently.
+- **Restrictions**: Generated model text, summaries, titles, and interpretations
+  are discarded. They cannot establish employer, title, description, location,
+  salary, experience, qualifications, or eligibility. Every grounded URL must
+  pass original-page retrieval and attributable vacancy parsing.
+- **Compliance Status**: Development-only and disabled unless
+  `JOB_DISCOVERY_GEMINI_SEARCH_ENABLED=true`; live validation pending.
 
 ---
 
@@ -47,6 +133,50 @@ For every job board or data source, document the following before enabling:
   gated Phase 7.1B.5A DEVELOPMENT morning path. Manual and morning writes share
   a persistent five-job Asia/Manila daily cap. Evening and production
   persistence remain disabled.
+
+---
+
+## Freelance discovery sources (Phase 7.1B.7A)
+
+### Himalayas public remote-jobs API
+
+- **Access**: Official public JSON API; no API key.
+- **Documentation**: https://himalayas.app/docs/remote-jobs-api
+- **Use**: Bounded keyword/country/worldwide/seniority/employment-type queries,
+  recent sorting, maximum page size 20, and bounded pagination. Only Part Time,
+  Contractor, Temporary, Intern, or other records with explicit freelance
+  evidence enter the freelance pipeline.
+- **Attribution**: The dashboard visibly labels Himalayas and retains the
+  public listing/application link. The roughly 24-hour source refresh is not
+  presented as real-time availability.
+- **Restrictions**: No republication as another marketplace, authenticated
+  scraping, proposal submission, or application automation.
+
+### Remotive freelance subset
+
+- **Access**: Existing official public JSON API; no API key.
+- **Documentation**: https://github.com/remotive-io/remote-jobs-api
+- **Use**: The existing adapter is followed by a freelance-specific layer.
+  `freelance`, `contract`, `part_time`, temporary, project-based, or independent
+  contractor evidence is required; ordinary full-time remote work is excluded.
+- **Attribution**: Every accepted record retains a visible Remotive label and
+  canonical Remotive link. The documented 24-hour listing delay and request
+  guidance still apply.
+
+### Tavily, Gemini Search, manual URLs, and pending marketplaces
+
+- Tavily retains its existing **API CREDITS** Search/Extract ledger. Search is
+  URL discovery and Extract is eligible fetch recovery only.
+- Gemini Search retains its existing **API QUOTA** adapter and separate model.
+  It is optional and isolated; the known `NETWORK_FAILURE` cannot stop other
+  freelance sources.
+- Neither snippets nor generated text is evidence. Original attributable public
+  pages must pass the existing URL, SSRF, compliance, and parser boundaries.
+- Manual import accepts one public HTTP/HTTPS opportunity URL and performs no
+  login, CAPTCHA bypass, cookie reuse, or submission.
+- Upwork official GraphQL API access is pending approval. Freelancer.com
+  official API access is pending. Neither site is scraped and neither adapter
+  makes a request in Phase 7.1B.7A.
 
 ---
 

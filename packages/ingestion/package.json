@@ -26,6 +26,10 @@
       "types": "./dist/gemini-job-requirements.server.d.ts",
       "default": "./dist/gemini-job-requirements.server.js"
     },
+    "./dashboard-server": {
+      "types": "./dist/dashboard-server.d.ts",
+      "default": "./dist/dashboard-server.js"
+    },
     "./job-requirements-contracts": {
       "types": "./dist/job-requirements-contracts.d.ts",
       "default": "./dist/job-requirements-contracts.js"
@@ -53,6 +57,50 @@
     "./discovery/profile-retrieval-hints": {
       "types": "./dist/discovery/profile-retrieval-hints.v1.d.ts",
       "default": "./dist/discovery/profile-retrieval-hints.v1.js"
+    },
+    "./discovery/dashboard-scan-contracts": {
+      "types": "./dist/discovery/dashboard-scan-contracts.d.ts",
+      "default": "./dist/discovery/dashboard-scan-contracts.js"
+    },
+    "./discovery/dashboard-scan": {
+      "types": "./dist/discovery/dashboard-scan.d.ts",
+      "default": "./dist/discovery/dashboard-scan.js"
+    },
+    "./discovery/philippine-time": {
+      "types": "./dist/discovery/philippine-time.d.ts",
+      "default": "./dist/discovery/philippine-time.js"
+    },
+    "./discovery/limits": {
+      "types": "./dist/discovery/limits.d.ts",
+      "default": "./dist/discovery/limits.js"
+    },
+    "./freelance/contracts": {
+      "types": "./dist/freelance/contracts.d.ts",
+      "default": "./dist/freelance/contracts.js"
+    },
+    "./freelance/classification": {
+      "types": "./dist/freelance/classification.d.ts",
+      "default": "./dist/freelance/classification.js"
+    },
+    "./freelance/repository": {
+      "types": "./dist/freelance/repository.d.ts",
+      "default": "./dist/freelance/repository.js"
+    },
+    "./freelance/scan": {
+      "types": "./dist/freelance/scan.d.ts",
+      "default": "./dist/freelance/scan.js"
+    },
+    "./freelance/runtime": {
+      "types": "./dist/freelance/runtime.d.ts",
+      "default": "./dist/freelance/runtime.js"
+    },
+    "./freelance/himalayas": {
+      "types": "./dist/freelance/adapters/himalayas.d.ts",
+      "default": "./dist/freelance/adapters/himalayas.js"
+    },
+    "./freelance/remotive": {
+      "types": "./dist/freelance/adapters/remotive.d.ts",
+      "default": "./dist/freelance/adapters/remotive.js"
     }
   },
   "scripts": {
@@ -62,6 +110,7 @@
     "discovery:arbeitnow": "node dist/discovery/arbeitnow-cli.js",
     "discovery:remotive": "node dist/discovery/remotive-cli.js",
     "discovery:lever": "node dist/discovery/lever-cli.js",
+    "discovery:profile-audit": "node dist/discovery/profile-coverage-audit-cli.js",
     "reprocess-job-extractions": "node dist/reprocess-job-extractions.js",
     "clean": "rm -rf dist"
   },

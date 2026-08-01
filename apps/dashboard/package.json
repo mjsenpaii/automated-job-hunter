@@ -13,6 +13,7 @@
     "@job-app/db": "workspace:*",
     "@job-app/ingestion": "workspace:*",
     "@job-app/scoring": "workspace:*",
+    "@trigger.dev/sdk": "4.5.7",
     "drizzle-orm": "^0.30.10",
     "next": "16.2.11",
     "react": "19.2.4",

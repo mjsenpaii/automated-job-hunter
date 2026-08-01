@@ -78,6 +78,7 @@ export async function enrichControlledPersistenceCandidate(
   verifiedSkills: SkillEntry[],
   extractor: DiscoveryRequirementsExtractor =
     extractVerifiedJobRequirements,
+  extractionOptions?: ExtractVerifiedJobRequirementsOptions,
 ): Promise<DiscoveryPersistenceRecord> {
   const original = record.result.normalized_job;
   if (!original) {
@@ -98,7 +99,7 @@ export async function enrichControlledPersistenceCandidate(
       location: record.discovered.location,
       tags: record.discovered.tags,
     },
-  });
+  }, extractionOptions);
   const extraction = reconcileVerifiedExtractionWithProvider(proposed, {
     salaryMin: original.salary_min,
     salaryMax: original.salary_max,

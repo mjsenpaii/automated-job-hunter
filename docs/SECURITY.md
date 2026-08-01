@@ -9,6 +9,21 @@ Private data must NEVER be committed. Ensure `.gitignore` correctly excludes:
 ## .env Handling
 Use `.env.example` to define required keys without values. `.env` files must stay local.
 
+The manual controlled-persistence switch and scheduled-persistence switch are
+separate and exact: `JOB_DISCOVERY_CONTROLLED_PERSISTENCE_ENABLED=true` does
+not enable scheduled writes, and
+`JOB_DISCOVERY_SCHEDULED_PERSISTENCE_ENABLED=true` does not enable the manual
+task. Their tracked sample values remain `false`. A successful production
+build does not override DEVELOPMENT-only task gates or enable persistence.
+
+Freelance discovery switches (`JOB_DISCOVERY_FREELANCE_ENABLED` and
+`FREELANCE_SOURCE_*`) are worker-only configuration in the root environment.
+Himalayas and Remotive need no key; Tavily and optional Gemini Search reuse the
+existing worker-only credentials. Do not copy freelance switches, provider
+keys, or quota settings into `apps/dashboard/.env.local` or any `NEXT_PUBLIC_*`
+variable. The dashboard keeps only its server-side Trigger credential and scan
+control switch.
+
 ## OAuth Token Storage
 OAuth tokens (e.g., Gmail) must be stored securely and locally, never exposed in logs or UI.
 

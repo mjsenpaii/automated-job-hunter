@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import {
   cleanJobContent,
   parseStoredJobSnapshot,
-} from '@job-app/ingestion';
+} from '@job-app/ingestion/dashboard-server';
 import { VerifiedJobRequirementsExtractionSchema } from '@job-app/ingestion/job-requirements-contracts';
 import { checkHardReject } from '@job-app/scoring';
 import { job_extractions, jobs, job_scores } from '@job-app/db/schema';
